@@ -98,8 +98,9 @@
     .d4a{animation:pd1 32s linear infinite;animation-delay:24s}.d4b{animation:pd2 32s linear infinite;animation-delay:24s}.d4c{animation:pd3 32s linear infinite;animation-delay:24s}
     .d4d{animation:pd4 32s linear infinite;animation-delay:24s}.d4e{animation:pd5 32s linear infinite;animation-delay:24s}.d4f{animation:pd6 32s linear infinite;animation-delay:24s}
 
-    /* Signature */
-    .sig{fill:#e8e8e8;fill-opacity:0;stroke:#e8e8e8;stroke-width:1.8;stroke-dasharray:3200;stroke-dashoffset:3200;stroke-linecap:square;stroke-linejoin:miter;animation:drawSig 5s cubic-bezier(.25,.1,.25,1) forwards,sigFill 5s ease forwards}
+    /* Signature — filled calligraphic path (variable width = real pen feel) */
+    .sig{fill:#e8e8e8;fill-opacity:0;stroke:#e8e8e8;stroke-width:1.5;stroke-dasharray:3500;stroke-dashoffset:3500;stroke-linecap:round;stroke-linejoin:round;animation:drawSig 5s cubic-bezier(.25,.1,.25,1) forwards,sigFill 5s ease forwards}
+    .sigBody{fill:#e8e8e8;opacity:0;animation:sigFill 5s ease forwards}
     .monoEdge{fill:none;stroke:#e8e8e8;stroke-width:.4;animation:pulse 8s ease-in-out infinite}
   </style>
 
@@ -207,23 +208,51 @@
   <text x="60" y="550" class="subMono" letter-spacing=".2em">EST. 2026</text>
 
   <!-- ============================================ -->
-  <!--  RIGHT: ANGULAR BLADE-CUT D1 MONOGRAM        -->
-  <!--  Faceted, sharp, no curves — precision cut    -->
+  <!--  RIGHT: CALLIGRAPHIC SIGNATURE               -->
+  <!--  "D1" as drawn path + "ChangGeng" as script   -->
   <!-- ============================================ -->
-  <g transform="translate(640, 55) scale(4.2)">
-    <!-- D: angular faceted letterform with cut counter -->
+  <g transform="translate(620, 90) scale(3.5)">
+    <!-- D: flowing calligraphic with open counter -->
     <path class="sig" fill-rule="evenodd" d="
-      M 10,5 L 60,5 L 85,15 L 100,40 L 105,65 L 100,90 L 85,110 L 60,120 L 10,120 Z
-      M 25,20 L 55,20 L 72,28 L 82,45 L 85,65 L 82,85 L 72,97 L 55,105 L 25,105 Z
+      M 8,95
+      C 8,80 8,30 12,18
+      C 16,6 24,2 38,2
+      C 52,2 68,8 80,22
+      C 92,36 98,56 98,72
+      C 98,88 92,100 80,108
+      C 68,116 52,118 38,116
+      C 24,114 14,106 10,98
+      L 8,95 Z
+      M 22,82
+      C 24,90 32,96 42,98
+      C 52,100 64,96 72,88
+      C 80,80 84,68 84,56
+      C 84,44 80,32 72,24
+      C 64,16 52,12 42,14
+      C 32,16 26,24 24,36
+      C 22,48 22,66 22,82 Z
     "/>
-    <!-- 1: sharp geometric with blade serif -->
+    <!-- 1: elegant with calligraphic flag -->
     <path class="sig" d="
-      M 128,5 L 140,5 L 140,105 L 155,105 L 155,120 L 115,120 L 115,105 L 130,105 L 130,22 L 118,32 L 112,24 Z
+      M 118,8 C 120,4 122,2 126,2 L 130,2 C 132,2 132,4 130,8
+      L 128,18 L 128,96 C 128,98 130,100 134,100 L 144,100
+      C 146,100 146,102 146,104 L 146,106 C 146,108 144,108 142,108
+      L 114,108 C 112,108 112,106 112,104 L 112,102 C 112,100 114,100 116,100
+      L 124,100 C 126,100 126,98 126,96 L 126,26
+      L 116,34 C 114,36 112,34 112,32 L 118,8 Z
     "/>
   </g>
+  <!-- "ChangGeng" in flowing script below D1 -->
+  <text x="780" y="510" fill="#e8e8e8" opacity="0"
+    font-family="'Snell Roundhand','Segoe Script','Apple Chancery','Lucida Handwriting',cursive"
+    font-size="42" font-style="italic" letter-spacing=".02em"
+    style="animation: sigFill 5s ease forwards; animation-delay: 2.5s">ChangGeng</text>
 
-  <!-- Subtle underline -->
-  <line x1="680" y1="530" x2="1120" y2="530" stroke="#1a1a1a" stroke-width=".5" opacity=".25"/>
+  <!-- Subtle signature underline flourish -->
+  <line x1="680" y1="535" x2="1130" y2="535" stroke="#1e1e1e" stroke-width=".5" opacity=".2"/>
+  <path fill="none" stroke="#1e1e1e" stroke-width=".4" opacity=".15"
+    d="M 1130,535 C 1135,535 1140,530 1140,525"/>
+
 
   <!-- Monogram edge accent -->
   <path class="monoEdge" d="M 1082 290 L 1082 520"/>
