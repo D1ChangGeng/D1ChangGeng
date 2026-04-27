@@ -7,10 +7,10 @@
       <feBlend in="SourceGraphic" mode="multiply"/>
     </filter>
     <clipPath id="leftZone"><rect x="30" y="30" width="520" height="540"/></clipPath>
-    <!-- Typewriter clip masks for each insight line -->
-    <clipPath id="tw1"><rect class="twClip1" x="60" y="210" width="0" height="22"/></clipPath>
-    <clipPath id="tw2"><rect class="twClip2" x="60" y="240" width="0" height="22"/></clipPath>
-    <clipPath id="tw3"><rect class="twClip3" x="60" y="270" width="0" height="22"/></clipPath>
+    <!-- Typewriter clip masks — larger text area -->
+    <clipPath id="tw1"><rect class="twClip1" x="55" y="205" width="0" height="30"/></clipPath>
+    <clipPath id="tw2"><rect class="twClip2" x="55" y="250" width="0" height="30"/></clipPath>
+    <clipPath id="tw3"><rect class="twClip3" x="55" y="295" width="0" height="30"/></clipPath>
   </defs>
 
   <style>
@@ -37,9 +37,9 @@
     /* Insight 1: 0s - 8s */
     @keyframes twReveal1 {
       0% { width: 0; }
-      12.5% { width: 460px; }  /* 3s typed */
-      22.9% { width: 460px; }  /* 5.5s hold */
-      27.1% { width: 460px; }  /* 6.5s dissolve (clip stays, opacity hides) */
+      12.5% { width: 520px; }
+      22.9% { width: 520px; }
+      27.1% { width: 520px; }
       27.2% { width: 0; }
       100% { width: 0; }
     }
@@ -53,9 +53,9 @@
     /* Insight 2: 8s - 16s → delay offsets: 33.3% - 66.6% */
     @keyframes twReveal2 {
       0%, 33.3% { width: 0; }
-      45.8% { width: 460px; }
-      56.2% { width: 460px; }
-      60.4% { width: 460px; }
+      45.8% { width: 520px; }
+      56.2% { width: 520px; }
+      60.4% { width: 520px; }
       60.5% { width: 0; }
       100% { width: 0; }
     }
@@ -69,9 +69,9 @@
     /* Insight 3: 16s - 24s → delay offsets: 66.6% - 100% */
     @keyframes twReveal3 {
       0%, 66.6% { width: 0; }
-      79.1% { width: 460px; }
-      89.6% { width: 460px; }
-      93.7% { width: 460px; }
+      79.1% { width: 520px; }
+      89.6% { width: 520px; }
+      93.7% { width: 520px; }
       93.8% { width: 0; }
       100% { width: 0; }
     }
@@ -86,9 +86,9 @@
     @keyframes cursorCycle {
       0%, 27.1% { opacity: 1; transform: translateY(0); }
       27.2%, 33.2% { opacity: 0; }
-      33.3%, 60.4% { opacity: 1; transform: translateY(30px); }
+      33.3%, 60.4% { opacity: 1; transform: translateY(45px); }
       60.5%, 66.5% { opacity: 0; }
-      66.6%, 93.7% { opacity: 1; transform: translateY(60px); }
+      66.6%, 93.7% { opacity: 1; transform: translateY(90px); }
       93.8%, 100% { opacity: 0; }
     }
 
@@ -148,7 +148,7 @@
     .atmos { fill: #2a2a2a; font-family: 'Courier New', monospace; }
     .extLine { stroke: #1e1e1e; stroke-width: 0.5; fill: none; stroke-dasharray: 270; animation: extendLine 10s ease-in-out infinite; }
     .subLabel { fill: #555555; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 300; animation: breathe 6s ease-in-out infinite; }
-    .subMono { fill: #555555; font-family: 'Courier New', monospace; animation: breathe 6s ease-in-out infinite; animation-delay: 1s; }
+    .subMono { fill: #555555; font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace; animation: breathe 6s ease-in-out infinite; animation-delay: 1s; }
     .monoEdge { fill: none; stroke: #e8e8e8; stroke-width: 0.5; animation: monoGlow 8s ease-in-out infinite; }
     .particle { fill: #333333; }
     .p1 { animation: float1 12s ease-in-out infinite; }
@@ -157,14 +157,14 @@
     /* Signature D1 */
     .sig {
       fill: #e8e8e8; fill-opacity: 0;
-      stroke: #e8e8e8; stroke-width: 2.5;
+      stroke: #e8e8e8; stroke-width: 2;
       stroke-dasharray: 2800; stroke-dashoffset: 2800;
       stroke-linecap: round; stroke-linejoin: round;
-      animation: drawSig 6s cubic-bezier(0.4,0,0.2,1) forwards, sigFill 6s ease forwards;
+      animation: drawSig 5s cubic-bezier(0.25,0.1,0.25,1) forwards, sigFill 5s ease forwards;
     }
 
     /* Typewriter text */
-    .twText { font-family: 'Courier New', monospace; font-size: 13px; letter-spacing: 0.02em; }
+    .twText { font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Courier New', monospace; font-size: 17px; letter-spacing: 0.01em; font-weight: 400; }
     .twClip1 { animation: twReveal1 24s linear infinite; }
     .twClip2 { animation: twReveal2 24s linear infinite; }
     .twClip3 { animation: twReveal3 24s linear infinite; }
@@ -173,7 +173,7 @@
     .tw3 { fill: #8a8a8a; clip-path: url(#tw3); animation: twOpacity3 24s linear infinite; }
 
     /* Typewriter cursor */
-    .twCursor { fill: #8a8a8a; animation: blink 0.8s step-end infinite, cursorCycle 24s linear infinite; }
+    .twCursor { fill: #8a8a8a; animation: blink 0.8s step-end infinite, cursorCycle 24s linear infinite; width: 9px; height: 17px; }
 
     /* Dissolve particles */
     .dp { fill: #8a8a8a; }
@@ -219,43 +219,48 @@
   <!-- ========== LEFT: TYPEWRITER INSIGHTS ========== -->
 
   <!-- Section label -->
-  <line class="extLine" x1="60" y1="195" x2="330" y2="195"/>
-  <text x="60" y="190" class="subLabel" font-size="9" letter-spacing="0.3em">THOUGHTS ON THE AI ERA</text>
+  <line class="extLine" x1="55" y1="195" x2="330" y2="195"/>
+  <text x="55" y="190" class="subLabel" font-size="9" letter-spacing="0.3em" font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', monospace">THOUGHTS ON THE AI ERA</text>
 
-  <!-- Insight 1 (typed, held, dissolved) -->
-  <text class="twText tw1" x="62" y="228">"The best code is the one you never write."</text>
+  <!-- Insight 1 -->
+  <text class="twText tw1" x="57" y="228">The best code is the one</text>
 
   <!-- Insight 2 -->
-  <text class="twText tw2" x="62" y="258">"Ship the prototype. Kill the roadmap."</text>
+  <text class="twText tw2" x="57" y="273">Ship the prototype.</text>
 
   <!-- Insight 3 -->
-  <text class="twText tw3" x="62" y="288">"AI writes code. Humans write intent."</text>
+  <text class="twText tw3" x="57" y="318">AI writes code.</text>
+
+  <!-- Insight sub-lines (same cycle) -->
+  <text class="twText tw1" x="57" y="248" style="font-size:14px;fill:#606060">you never write.</text>
+  <text class="twText tw2" x="57" y="293" style="font-size:14px;fill:#606060">Kill the roadmap.</text>
+  <text class="twText tw3" x="57" y="338" style="font-size:14px;fill:#606060">Humans write intent.</text>
 
   <!-- Typewriter cursor -->
-  <rect class="twCursor" x="62" y="218" width="7" height="13" rx="0.5"/>
+  <rect class="twCursor" x="57" y="216" width="9" height="17" rx="1"/>
 
   <!-- Dissolve particles for insight 1 -->
   <g>
-    <circle class="dp b1a" cx="120" cy="224" r="1"/><circle class="dp b1b" cx="180" cy="220" r="0.8"/>
-    <circle class="dp b1c" cx="250" cy="226" r="1.1"/><circle class="dp b1d" cx="310" cy="222" r="0.7"/>
-    <circle class="dp b1e" cx="160" cy="228" r="0.9"/><circle class="dp b1f" cx="350" cy="218" r="0.8"/>
-    <circle class="dp b1g" cx="220" cy="230" r="1"/><circle class="dp b1h" cx="400" cy="224" r="0.6"/>
+    <circle class="dp b1a" cx="100" cy="235" r="1.2"/><circle class="dp b1b" cx="170" cy="228" r="1"/>
+    <circle class="dp b1c" cx="250" cy="240" r="1.3"/><circle class="dp b1d" cx="330" cy="232" r="0.9"/>
+    <circle class="dp b1e" cx="140" cy="242" r="1.1"/><circle class="dp b1f" cx="380" cy="226" r="1"/>
+    <circle class="dp b1g" cx="210" cy="245" r="1.2"/><circle class="dp b1h" cx="440" cy="235" r="0.8"/>
   </g>
 
   <!-- Dissolve particles for insight 2 -->
   <g>
-    <circle class="dp b2a" cx="120" cy="254" r="1"/><circle class="dp b2b" cx="180" cy="250" r="0.8"/>
-    <circle class="dp b2c" cx="250" cy="256" r="1.1"/><circle class="dp b2d" cx="310" cy="252" r="0.7"/>
-    <circle class="dp b2e" cx="160" cy="258" r="0.9"/><circle class="dp b2f" cx="350" cy="248" r="0.8"/>
-    <circle class="dp b2g" cx="220" cy="260" r="1"/><circle class="dp b2h" cx="400" cy="254" r="0.6"/>
+    <circle class="dp b2a" cx="100" cy="280" r="1.2"/><circle class="dp b2b" cx="170" cy="273" r="1"/>
+    <circle class="dp b2c" cx="250" cy="285" r="1.3"/><circle class="dp b2d" cx="330" cy="277" r="0.9"/>
+    <circle class="dp b2e" cx="140" cy="287" r="1.1"/><circle class="dp b2f" cx="380" cy="271" r="1"/>
+    <circle class="dp b2g" cx="210" cy="290" r="1.2"/><circle class="dp b2h" cx="440" cy="280" r="0.8"/>
   </g>
 
   <!-- Dissolve particles for insight 3 -->
   <g>
-    <circle class="dp b3a" cx="120" cy="284" r="1"/><circle class="dp b3b" cx="180" cy="280" r="0.8"/>
-    <circle class="dp b3c" cx="250" cy="286" r="1.1"/><circle class="dp b3d" cx="310" cy="282" r="0.7"/>
-    <circle class="dp b3e" cx="160" cy="288" r="0.9"/><circle class="dp b3f" cx="350" cy="278" r="0.8"/>
-    <circle class="dp b3g" cx="220" cy="290" r="1"/><circle class="dp b3h" cx="400" cy="284" r="0.6"/>
+    <circle class="dp b3a" cx="100" cy="325" r="1.2"/><circle class="dp b3b" cx="170" cy="318" r="1"/>
+    <circle class="dp b3c" cx="250" cy="330" r="1.3"/><circle class="dp b3d" cx="330" cy="322" r="0.9"/>
+    <circle class="dp b3e" cx="140" cy="332" r="1.1"/><circle class="dp b3f" cx="380" cy="316" r="1"/>
+    <circle class="dp b3g" cx="210" cy="335" r="1.2"/><circle class="dp b3h" cx="440" cy="325" r="0.8"/>
   </g>
 
   <!-- Bottom labels -->
@@ -263,40 +268,56 @@
   <text x="60" y="550" class="subMono" font-size="9" letter-spacing="0.2em">EST. 2026</text>
 
   <!-- ========== RIGHT: SIGNATURE D1 MONOGRAM ========== -->
-  <!-- Hand-drawn calligraphic "D1" — flowing script with natural pen strokes -->
-  <g transform="translate(680, 80) scale(3.2)">
+  <!-- Luxury calligraphic "D1" — sweeping italic strokes with flourish -->
+  <g transform="translate(620, 60) scale(3.8)">
     <path class="sig" d="
-      M 12,120
-      C 12,120 10,10 50,8
-      C 90,6 120,25 125,60
-      C 130,95 105,125 70,130
-      C 50,133 25,128 12,120
+      M 8,108
+      C 8,108 6,95 8,75
+      C 10,55 14,30 20,18
+      C 26,6 35,2 48,4
+      C 61,6 78,16 88,32
+      C 98,48 102,70 100,88
+      C 98,106 88,118 72,122
+      C 56,126 38,120 24,112
+      C 16,107 10,100 8,108
       Z
-      M 40,40
-      C 55,38 75,45 78,65
-      C 81,85 68,100 50,102
-      C 38,103 28,98 25,85
-      C 22,72 30,42 40,40
+      M 30,30
+      C 38,22 50,20 60,28
+      C 70,36 76,52 76,68
+      C 76,84 70,98 58,104
+      C 46,110 34,106 28,96
+      C 22,86 22,68 26,52
+      C 28,42 30,34 30,30
 
-      M 140,15
-      L 138,10
-      L 148,10
-      L 142,35
-      L 142,120
-      L 155,120
-      L 155,128
-      L 128,128
-      L 128,120
-      L 138,120
-      L 138,35
-      L 130,42
-      L 128,38
+      M 120,6
+      C 118,4 116,2 120,2
+      L 130,2
+      C 132,2 132,4 130,6
+      L 126,22
+      L 126,100
+      C 126,102 128,104 132,104
+      L 142,104
+      C 144,104 144,106 144,108
+      L 144,112
+      C 144,114 142,114 140,114
+      L 112,114
+      C 110,114 110,112 110,110
+      L 110,108
+      C 110,106 112,104 114,104
+      L 122,104
+      C 124,104 124,102 124,100
+      L 124,22
+      L 114,34
+      C 112,36 110,34 110,32
       Z
     "/>
   </g>
 
+  <!-- Monogram subtle underline flourish -->
+  <line x1="680" y1="500" x2="1120" y2="500" stroke="#1e1e1e" stroke-width="0.5" opacity="0.3"/>
+
   <!-- Monogram edge glow -->
-  <path class="monoEdge" d="M 718 336 A 200 200 0 0 1 718 496" stroke-width="1"/>
+  <path class="monoEdge" d="M 650 300 C 650 200 700 100 800 80" stroke-width="1"/>
 
   <!-- Scanlines -->
   <rect class="scan" x="0" y="0" width="100%" height="1"/>
