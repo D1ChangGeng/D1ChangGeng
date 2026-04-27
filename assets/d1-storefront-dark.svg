@@ -6,208 +6,106 @@
       <feComponentTransfer><feFuncA type="linear" slope="0.06"/></feComponentTransfer>
       <feBlend in="SourceGraphic" mode="multiply"/>
     </filter>
-    <clipPath id="leftZone"><rect x="30" y="30" width="520" height="540"/></clipPath>
-    <!-- Typewriter clip masks — larger text area -->
-    <clipPath id="tw1"><rect class="twClip1" x="55" y="205" width="0" height="30"/></clipPath>
-    <clipPath id="tw2"><rect class="twClip2" x="55" y="250" width="0" height="30"/></clipPath>
-    <clipPath id="tw3"><rect class="twClip3" x="55" y="295" width="0" height="30"/></clipPath>
   </defs>
 
   <style>
-    /* ======================== */
-    /* SIGNATURE STROKE DRAW    */
-    /* ======================== */
-    @keyframes drawSig {
-      0% { stroke-dashoffset: 2800; }
-      60% { stroke-dashoffset: 0; }
-      100% { stroke-dashoffset: 0; }
-    }
-    @keyframes sigFill {
-      0%, 55% { fill-opacity: 0; }
-      80% { fill-opacity: 1; }
-      100% { fill-opacity: 1; }
-    }
+    /* ============================== */
+    /*  INSIGHT CYCLE: 32s total      */
+    /*  4 insights x 8s each          */
+    /*  Each: 0-2.5s assemble         */
+    /*        2.5-5.5s hold           */
+    /*        5.5-7s dissolve         */
+    /*        7-8s empty              */
+    /* ============================== */
 
-    /* ======================== */
-    /* TYPEWRITER CLIP EXPAND   */
-    /* ======================== */
-    /* Total cycle: 24s = 3 insights x 8s each */
-    /* Each insight: 0-3s type in, 3-5.5s hold, 5.5-6.5s dissolve, 6.5-8s empty */
-
-    /* Insight 1: 0s - 8s */
-    @keyframes twReveal1 {
-      0% { width: 0; }
-      12.5% { width: 520px; }
-      22.9% { width: 520px; }
-      27.1% { width: 520px; }
-      27.2% { width: 0; }
-      100% { width: 0; }
+    /* Insight visibility (opacity in/out) */
+    @keyframes ins1 {
+      0%{opacity:0} 3%{opacity:0} 5%{opacity:1} 18%{opacity:1} 22%{opacity:0} 100%{opacity:0}
     }
-    @keyframes twOpacity1 {
-      0%, 1% { opacity: 0; } 1.5% { opacity: 1; }
-      22.9% { opacity: 1; }
-      27.1% { opacity: 0; }
-      100% { opacity: 0; }
+    @keyframes ins2 {
+      0%{opacity:0} 28%{opacity:0} 30%{opacity:1} 43%{opacity:1} 47%{opacity:0} 100%{opacity:0}
+    }
+    @keyframes ins3 {
+      0%{opacity:0} 53%{opacity:0} 55%{opacity:1} 68%{opacity:1} 72%{opacity:0} 100%{opacity:0}
+    }
+    @keyframes ins4 {
+      0%{opacity:0} 78%{opacity:0} 80%{opacity:1} 93%{opacity:1} 97%{opacity:0} 100%{opacity:0}
     }
 
-    /* Insight 2: 8s - 16s → delay offsets: 33.3% - 66.6% */
-    @keyframes twReveal2 {
-      0%, 33.3% { width: 0; }
-      45.8% { width: 520px; }
-      56.2% { width: 520px; }
-      60.4% { width: 520px; }
-      60.5% { width: 0; }
-      100% { width: 0; }
-    }
-    @keyframes twOpacity2 {
-      0%, 33.3% { opacity: 0; } 34.8% { opacity: 1; }
-      56.2% { opacity: 1; }
-      60.4% { opacity: 0; }
-      100% { opacity: 0; }
-    }
+    /* Particle ASSEMBLE: scattered → converge to origin */
+    @keyframes pa1{0%{transform:translate(45,-30);opacity:0}4%{opacity:.6}8%{transform:translate(0,0);opacity:.7}10%{opacity:0}100%{opacity:0}}
+    @keyframes pa2{0%{transform:translate(-35,40);opacity:0}4%{opacity:.5}8%{transform:translate(0,0);opacity:.6}10%{opacity:0}100%{opacity:0}}
+    @keyframes pa3{0%{transform:translate(55,25);opacity:0}4%{opacity:.5}8%{transform:translate(0,0);opacity:.6}10%{opacity:0}100%{opacity:0}}
+    @keyframes pa4{0%{transform:translate(-50,-35);opacity:0}4%{opacity:.4}8%{transform:translate(0,0);opacity:.5}10%{opacity:0}100%{opacity:0}}
+    @keyframes pa5{0%{transform:translate(30,45);opacity:0}4%{opacity:.5}8%{transform:translate(0,0);opacity:.5}10%{opacity:0}100%{opacity:0}}
+    @keyframes pa6{0%{transform:translate(-40,-20);opacity:0}4%{opacity:.6}8%{transform:translate(0,0);opacity:.6}10%{opacity:0}100%{opacity:0}}
 
-    /* Insight 3: 16s - 24s → delay offsets: 66.6% - 100% */
-    @keyframes twReveal3 {
-      0%, 66.6% { width: 0; }
-      79.1% { width: 520px; }
-      89.6% { width: 520px; }
-      93.7% { width: 520px; }
-      93.8% { width: 0; }
-      100% { width: 0; }
-    }
-    @keyframes twOpacity3 {
-      0%, 66.6% { opacity: 0; } 68.1% { opacity: 1; }
-      89.6% { opacity: 1; }
-      93.7% { opacity: 0; }
-      100% { opacity: 0; }
-    }
+    /* Particle DISSOLVE: origin → scatter outward */
+    @keyframes pd1{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.7}28%{opacity:0;transform:translate(50,-35)}100%{opacity:0}}
+    @keyframes pd2{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.6}29%{opacity:0;transform:translate(-40,30)}100%{opacity:0}}
+    @keyframes pd3{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.5}27%{opacity:0;transform:translate(60,20)}100%{opacity:0}}
+    @keyframes pd4{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.6}30%{opacity:0;transform:translate(-55,-25)}100%{opacity:0}}
+    @keyframes pd5{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.5}26%{opacity:0;transform:translate(35,40)}100%{opacity:0}}
+    @keyframes pd6{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.4}31%{opacity:0;transform:translate(-30,-40)}100%{opacity:0}}
 
-    /* Cursor tracks typewriter horizontally + jumps between lines */
-    @keyframes cursorCycle {
-      /* Insight 1: type in (0-12.5%), hold (12.5-22.9%), fade (22.9-27.1%) */
-      0%    { transform: translate(0, 0); opacity: 1; }
-      1%    { transform: translate(0, 0); opacity: 1; }
-      12.5% { transform: translate(370, 0); opacity: 1; }
-      22.9% { transform: translate(370, 0); opacity: 1; }
-      27.1% { transform: translate(370, 0); opacity: 0; }
-      /* Gap */
-      27.2% { transform: translate(0, 45); opacity: 0; }
-      33.2% { transform: translate(0, 45); opacity: 0; }
-      /* Insight 2: type in (33.3-45.8%), hold (45.8-56.2%), fade (56.2-60.4%) */
-      33.3% { transform: translate(0, 45); opacity: 1; }
-      45.8% { transform: translate(310, 45); opacity: 1; }
-      56.2% { transform: translate(310, 45); opacity: 1; }
-      60.4% { transform: translate(310, 45); opacity: 0; }
-      /* Gap */
-      60.5% { transform: translate(0, 90); opacity: 0; }
-      66.5% { transform: translate(0, 90); opacity: 0; }
-      /* Insight 3: type in (66.6-79.1%), hold (79.1-89.6%), fade (89.6-93.7%) */
-      66.6% { transform: translate(0, 90); opacity: 1; }
-      79.1% { transform: translate(250, 90); opacity: 1; }
-      89.6% { transform: translate(250, 90); opacity: 1; }
-      93.7% { transform: translate(250, 90); opacity: 0; }
-      /* Reset gap */
-      93.8% { transform: translate(0, 0); opacity: 0; }
-      100%  { transform: translate(0, 0); opacity: 0; }
-    }
+    /* Ambient */
+    @keyframes scanline{0%{transform:translateY(-2);opacity:0}8%{opacity:.2}92%{opacity:.2}100%{transform:translateY(600);opacity:0}}
+    @keyframes vscan{0%{transform:translateX(-2);opacity:0}10%{opacity:.1}90%{opacity:.1}100%{transform:translateX(1200);opacity:0}}
+    @keyframes pulse{0%,100%{opacity:.3}50%{opacity:.75}}
+    @keyframes breathe{0%,100%{opacity:.4}50%{opacity:.8}}
+    @keyframes extendLine{0%{stroke-dashoffset:270}40%{stroke-dashoffset:0}60%{stroke-dashoffset:0}100%{stroke-dashoffset:-270}}
+    @keyframes drawSig{0%{stroke-dashoffset:3200}55%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+    @keyframes sigFill{0%,50%{fill-opacity:0}75%{fill-opacity:1}100%{fill-opacity:1}}
 
-    /* ======================== */
-    /* PARTICLE DISSOLVE BURSTS */
-    /* ======================== */
-    /* Burst 1: fires at ~24% (insight 1 dissolve) */
-    @keyframes burst1a { 0%,22%{opacity:0;transform:translate(0,0)}24%{opacity:0.6}30%{opacity:0;transform:translate(30px,-15px)}100%{opacity:0} }
-    @keyframes burst1b { 0%,22%{opacity:0;transform:translate(0,0)}24%{opacity:0.5}31%{opacity:0;transform:translate(-20px,-25px)}100%{opacity:0} }
-    @keyframes burst1c { 0%,22%{opacity:0;transform:translate(0,0)}24%{opacity:0.5}29%{opacity:0;transform:translate(40px,10px)}100%{opacity:0} }
-    @keyframes burst1d { 0%,22%{opacity:0;transform:translate(0,0)}24%{opacity:0.4}32%{opacity:0;transform:translate(-15px,20px)}100%{opacity:0} }
-    @keyframes burst1e { 0%,22%{opacity:0;transform:translate(0,0)}24%{opacity:0.5}28%{opacity:0;transform:translate(25px,-30px)}100%{opacity:0} }
-    @keyframes burst1f { 0%,22%{opacity:0;transform:translate(0,0)}24%{opacity:0.3}33%{opacity:0;transform:translate(-35px,-8px)}100%{opacity:0} }
-    @keyframes burst1g { 0%,22%{opacity:0;transform:translate(0,0)}24%{opacity:0.4}30%{opacity:0;transform:translate(18px,25px)}100%{opacity:0} }
-    @keyframes burst1h { 0%,22%{opacity:0;transform:translate(0,0)}24%{opacity:0.5}27%{opacity:0;transform:translate(-28px,15px)}100%{opacity:0} }
+    /* Base */
+    .bg{fill:#0a0a0a}
+    .scan{animation:scanline 18s linear infinite;fill:#1a1a1a}
+    .vscan{animation:vscan 25s linear infinite;fill:#1a1a1a}
+    .crop{stroke:#222;fill:none;stroke-width:.5;animation:pulse 4s ease-in-out infinite}
+    .atmos{fill:#2a2a2a;font-family:'JetBrains Mono','Fira Code','SF Mono','Courier New',monospace}
+    .extLine{stroke:#1e1e1e;stroke-width:.5;fill:none;stroke-dasharray:270;animation:extendLine 10s ease-in-out infinite}
+    .subLabel{fill:#555;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-weight:300;animation:breathe 6s ease-in-out infinite}
+    .subMono{fill:#555;font-family:'JetBrains Mono','Fira Code','SF Mono','Courier New',monospace;font-size:9px;animation:breathe 6s ease-in-out infinite;animation-delay:1s}
 
-    /* Burst 2: fires at ~57% (insight 2 dissolve) */
-    @keyframes burst2a { 0%,55%{opacity:0;transform:translate(0,0)}57%{opacity:0.6}63%{opacity:0;transform:translate(35px,-18px)}100%{opacity:0} }
-    @keyframes burst2b { 0%,55%{opacity:0;transform:translate(0,0)}57%{opacity:0.5}64%{opacity:0;transform:translate(-22px,-28px)}100%{opacity:0} }
-    @keyframes burst2c { 0%,55%{opacity:0;transform:translate(0,0)}57%{opacity:0.5}62%{opacity:0;transform:translate(42px,12px)}100%{opacity:0} }
-    @keyframes burst2d { 0%,55%{opacity:0;transform:translate(0,0)}57%{opacity:0.4}65%{opacity:0;transform:translate(-18px,22px)}100%{opacity:0} }
-    @keyframes burst2e { 0%,55%{opacity:0;transform:translate(0,0)}57%{opacity:0.5}61%{opacity:0;transform:translate(28px,-32px)}100%{opacity:0} }
-    @keyframes burst2f { 0%,55%{opacity:0;transform:translate(0,0)}57%{opacity:0.3}66%{opacity:0;transform:translate(-38px,-10px)}100%{opacity:0} }
-    @keyframes burst2g { 0%,55%{opacity:0;transform:translate(0,0)}57%{opacity:0.4}63%{opacity:0;transform:translate(20px,28px)}100%{opacity:0} }
-    @keyframes burst2h { 0%,55%{opacity:0;transform:translate(0,0)}57%{opacity:0.5}60%{opacity:0;transform:translate(-30px,18px)}100%{opacity:0} }
+    /* Insight text */
+    .iFont{font-family:'JetBrains Mono','Fira Code','SF Mono','Courier New',monospace;font-size:15px;fill:#999;letter-spacing:.01em}
+    .iSub{font-family:'JetBrains Mono','Fira Code','SF Mono','Courier New',monospace;font-size:11px;fill:#555;letter-spacing:.02em}
+    .iAttr{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:9px;fill:#444;letter-spacing:.15em;font-weight:300}
+    .i1{animation:ins1 32s linear infinite}
+    .i2{animation:ins2 32s linear infinite}
+    .i3{animation:ins3 32s linear infinite}
+    .i4{animation:ins4 32s linear infinite}
 
-    /* Burst 3: fires at ~90% (insight 3 dissolve) */
-    @keyframes burst3a { 0%,88%{opacity:0;transform:translate(0,0)}90%{opacity:0.6}96%{opacity:0;transform:translate(32px,-20px)}100%{opacity:0} }
-    @keyframes burst3b { 0%,88%{opacity:0;transform:translate(0,0)}90%{opacity:0.5}97%{opacity:0;transform:translate(-25px,-22px)}100%{opacity:0} }
-    @keyframes burst3c { 0%,88%{opacity:0;transform:translate(0,0)}90%{opacity:0.5}95%{opacity:0;transform:translate(38px,15px)}100%{opacity:0} }
-    @keyframes burst3d { 0%,88%{opacity:0;transform:translate(0,0)}90%{opacity:0.4}98%{opacity:0;transform:translate(-12px,25px)}100%{opacity:0} }
-    @keyframes burst3e { 0%,88%{opacity:0;transform:translate(0,0)}90%{opacity:0.5}94%{opacity:0;transform:translate(22px,-28px)}100%{opacity:0} }
-    @keyframes burst3f { 0%,88%{opacity:0;transform:translate(0,0)}90%{opacity:0.3}99%{opacity:0;transform:translate(-32px,-12px)}100%{opacity:0} }
-    @keyframes burst3g { 0%,88%{opacity:0;transform:translate(0,0)}90%{opacity:0.4}96%{opacity:0;transform:translate(15px,30px)}100%{opacity:0} }
-    @keyframes burst3h { 0%,88%{opacity:0;transform:translate(0,0)}90%{opacity:0.5}93%{opacity:0;transform:translate(-26px,12px)}100%{opacity:0} }
+    /* Assemble particles per insight */
+    .ap{fill:#666}
+    .a1a{animation:pa1 32s linear infinite}.a1b{animation:pa2 32s linear infinite}.a1c{animation:pa3 32s linear infinite}
+    .a1d{animation:pa4 32s linear infinite}.a1e{animation:pa5 32s linear infinite}.a1f{animation:pa6 32s linear infinite}
+    .a2a{animation:pa1 32s linear infinite;animation-delay:8s}.a2b{animation:pa2 32s linear infinite;animation-delay:8s}.a2c{animation:pa3 32s linear infinite;animation-delay:8s}
+    .a2d{animation:pa4 32s linear infinite;animation-delay:8s}.a2e{animation:pa5 32s linear infinite;animation-delay:8s}.a2f{animation:pa6 32s linear infinite;animation-delay:8s}
+    .a3a{animation:pa1 32s linear infinite;animation-delay:16s}.a3b{animation:pa2 32s linear infinite;animation-delay:16s}.a3c{animation:pa3 32s linear infinite;animation-delay:16s}
+    .a3d{animation:pa4 32s linear infinite;animation-delay:16s}.a3e{animation:pa5 32s linear infinite;animation-delay:16s}.a3f{animation:pa6 32s linear infinite;animation-delay:16s}
+    .a4a{animation:pa1 32s linear infinite;animation-delay:24s}.a4b{animation:pa2 32s linear infinite;animation-delay:24s}.a4c{animation:pa3 32s linear infinite;animation-delay:24s}
+    .a4d{animation:pa4 32s linear infinite;animation-delay:24s}.a4e{animation:pa5 32s linear infinite;animation-delay:24s}.a4f{animation:pa6 32s linear infinite;animation-delay:24s}
 
-    /* ======================== */
-    /* INHERITED AMBIENT ANIMS  */
-    /* ======================== */
-    @keyframes scanline { 0%{transform:translateY(-2px);opacity:0}8%{opacity:0.25}92%{opacity:0.25}100%{transform:translateY(600px);opacity:0} }
-    @keyframes pulse { 0%,100%{opacity:0.3}50%{opacity:0.8} }
-    @keyframes blink { 0%,49%{opacity:1}50%,100%{opacity:0} }
-    @keyframes extendLine { 0%{stroke-dashoffset:270}40%{stroke-dashoffset:0}60%{stroke-dashoffset:0}100%{stroke-dashoffset:-270} }
-    @keyframes vscan { 0%{transform:translateX(-2px);opacity:0}10%{opacity:0.12}90%{opacity:0.12}100%{transform:translateX(1200px);opacity:0} }
-    @keyframes monoGlow { 0%,100%{opacity:0.03}50%{opacity:0.08} }
-    @keyframes breathe { 0%,100%{opacity:0.45}50%{opacity:0.85} }
-    @keyframes float1 { 0%{transform:translate(0,0);opacity:0}15%{opacity:0.35}85%{opacity:0.35}100%{transform:translate(12px,-80px);opacity:0} }
-    @keyframes float2 { 0%{transform:translate(0,0);opacity:0}20%{opacity:0.25}80%{opacity:0.25}100%{transform:translate(-8px,-65px);opacity:0} }
+    /* Dissolve particles per insight */
+    .dp{fill:#666}
+    .d1a{animation:pd1 32s linear infinite}.d1b{animation:pd2 32s linear infinite}.d1c{animation:pd3 32s linear infinite}
+    .d1d{animation:pd4 32s linear infinite}.d1e{animation:pd5 32s linear infinite}.d1f{animation:pd6 32s linear infinite}
+    .d2a{animation:pd1 32s linear infinite;animation-delay:8s}.d2b{animation:pd2 32s linear infinite;animation-delay:8s}.d2c{animation:pd3 32s linear infinite;animation-delay:8s}
+    .d2d{animation:pd4 32s linear infinite;animation-delay:8s}.d2e{animation:pd5 32s linear infinite;animation-delay:8s}.d2f{animation:pd6 32s linear infinite;animation-delay:8s}
+    .d3a{animation:pd1 32s linear infinite;animation-delay:16s}.d3b{animation:pd2 32s linear infinite;animation-delay:16s}.d3c{animation:pd3 32s linear infinite;animation-delay:16s}
+    .d3d{animation:pd4 32s linear infinite;animation-delay:16s}.d3e{animation:pd5 32s linear infinite;animation-delay:16s}.d3f{animation:pd6 32s linear infinite;animation-delay:16s}
+    .d4a{animation:pd1 32s linear infinite;animation-delay:24s}.d4b{animation:pd2 32s linear infinite;animation-delay:24s}.d4c{animation:pd3 32s linear infinite;animation-delay:24s}
+    .d4d{animation:pd4 32s linear infinite;animation-delay:24s}.d4e{animation:pd5 32s linear infinite;animation-delay:24s}.d4f{animation:pd6 32s linear infinite;animation-delay:24s}
 
-    /* ======================== */
-    /* BASE STYLES              */
-    /* ======================== */
-    .bg { fill: #0a0a0a; }
-    .scan { animation: scanline 18s linear infinite; fill: #1a1a1a; }
-    .vscan { animation: vscan 25s linear infinite; fill: #1a1a1a; }
-    .crop { stroke: #222222; fill: none; stroke-width: 0.5; animation: pulse 4s ease-in-out infinite; }
-    .atmos { fill: #2a2a2a; font-family: 'Courier New', monospace; }
-    .extLine { stroke: #1e1e1e; stroke-width: 0.5; fill: none; stroke-dasharray: 270; animation: extendLine 10s ease-in-out infinite; }
-    .subLabel { fill: #555555; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 300; animation: breathe 6s ease-in-out infinite; }
-    .subMono { fill: #555555; font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace; animation: breathe 6s ease-in-out infinite; animation-delay: 1s; }
-    .monoEdge { fill: none; stroke: #e8e8e8; stroke-width: 0.5; animation: monoGlow 8s ease-in-out infinite; }
-    .particle { fill: #333333; }
-    .p1 { animation: float1 12s ease-in-out infinite; }
-    .p2 { animation: float2 15s ease-in-out infinite; animation-delay: 3s; }
-
-    /* Signature D1 */
-    .sig {
-      fill: #e8e8e8; fill-opacity: 0;
-      stroke: #e8e8e8; stroke-width: 2;
-      stroke-dasharray: 2800; stroke-dashoffset: 2800;
-      stroke-linecap: round; stroke-linejoin: round;
-      animation: drawSig 5s cubic-bezier(0.25,0.1,0.25,1) forwards, sigFill 5s ease forwards;
-    }
-
-    /* Typewriter text */
-    .twText { font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Courier New', monospace; font-size: 17px; letter-spacing: 0.01em; font-weight: 400; }
-    .twClip1 { animation: twReveal1 24s linear infinite; }
-    .twClip2 { animation: twReveal2 24s linear infinite; }
-    .twClip3 { animation: twReveal3 24s linear infinite; }
-    .tw1 { fill: #8a8a8a; clip-path: url(#tw1); animation: twOpacity1 24s linear infinite; }
-    .tw2 { fill: #8a8a8a; clip-path: url(#tw2); animation: twOpacity2 24s linear infinite; }
-    .tw3 { fill: #8a8a8a; clip-path: url(#tw3); animation: twOpacity3 24s linear infinite; }
-
-    /* Typewriter cursor — blink on rect, position on wrapper g */
-    .twCursorWrap { animation: cursorCycle 24s linear infinite; }
-    .twCursorRect { fill: #8a8a8a; animation: blink 0.8s step-end infinite; }
-
-    /* Dissolve particles */
-    .dp { fill: #8a8a8a; }
-    .b1a{animation:burst1a 24s linear infinite}.b1b{animation:burst1b 24s linear infinite}.b1c{animation:burst1c 24s linear infinite}.b1d{animation:burst1d 24s linear infinite}
-    .b1e{animation:burst1e 24s linear infinite}.b1f{animation:burst1f 24s linear infinite}.b1g{animation:burst1g 24s linear infinite}.b1h{animation:burst1h 24s linear infinite}
-    .b2a{animation:burst2a 24s linear infinite}.b2b{animation:burst2b 24s linear infinite}.b2c{animation:burst2c 24s linear infinite}.b2d{animation:burst2d 24s linear infinite}
-    .b2e{animation:burst2e 24s linear infinite}.b2f{animation:burst2f 24s linear infinite}.b2g{animation:burst2g 24s linear infinite}.b2h{animation:burst2h 24s linear infinite}
-    .b3a{animation:burst3a 24s linear infinite}.b3b{animation:burst3b 24s linear infinite}.b3c{animation:burst3c 24s linear infinite}.b3d{animation:burst3d 24s linear infinite}
-    .b3e{animation:burst3e 24s linear infinite}.b3f{animation:burst3f 24s linear infinite}.b3g{animation:burst3g 24s linear infinite}.b3h{animation:burst3h 24s linear infinite}
+    /* Signature */
+    .sig{fill:#e8e8e8;fill-opacity:0;stroke:#e8e8e8;stroke-width:1.8;stroke-dasharray:3200;stroke-dashoffset:3200;stroke-linecap:square;stroke-linejoin:miter;animation:drawSig 5s cubic-bezier(.25,.1,.25,1) forwards,sigFill 5s ease forwards}
+    .monoEdge{fill:none;stroke:#e8e8e8;stroke-width:.4;animation:pulse 8s ease-in-out infinite}
   </style>
 
   <!-- Background + noise -->
   <rect class="bg" width="100%" height="100%"/>
-  <rect width="100%" height="100%" filter="url(#noise)" opacity="0.4"/>
+  <rect width="100%" height="100%" filter="url(#noise)" opacity=".4"/>
 
   <!-- Crop marks -->
   <path class="crop" d="M 30 50 L 30 30 L 50 30"/>
@@ -215,133 +113,120 @@
   <path class="crop" d="M 30 550 L 30 570 L 50 570" style="animation-delay:2s"/>
   <path class="crop" d="M 1150 570 L 1170 570 L 1170 550" style="animation-delay:3s"/>
 
-  <!-- Center crosshair -->
-  <line x1="595" y1="290" x2="605" y2="290" stroke="#1a1a1a" stroke-width="0.3" opacity="0.4"/>
-  <line x1="600" y1="285" x2="600" y2="295" stroke="#1a1a1a" stroke-width="0.3" opacity="0.4"/>
-
-  <!-- Ambient particles -->
-  <g clip-path="url(#leftZone)">
-    <circle class="particle p1" cx="120" cy="480" r="1"/>
-    <circle class="particle p2" cx="200" cy="520" r="0.8"/>
-  </g>
-
   <!-- Atmosphere -->
-  <text x="40" y="48" class="atmos" font-size="9" letter-spacing="0.15em">AW26</text>
+  <text x="40" y="48" class="atmos" font-size="9" letter-spacing=".15em">AW26</text>
 
   <!-- Measurement scale -->
-  <line x1="18" y1="100" x2="18" y2="500" stroke="#151515" stroke-width="0.3"/>
-  <line x1="15" y1="100" x2="21" y2="100" stroke="#151515" stroke-width="0.3"/>
-  <line x1="15" y1="200" x2="21" y2="200" stroke="#151515" stroke-width="0.3"/>
-  <line x1="15" y1="300" x2="21" y2="300" stroke="#151515" stroke-width="0.3"/>
-  <line x1="15" y1="400" x2="21" y2="400" stroke="#151515" stroke-width="0.3"/>
-  <line x1="15" y1="500" x2="21" y2="500" stroke="#151515" stroke-width="0.3"/>
+  <line x1="18" y1="100" x2="18" y2="500" stroke="#151515" stroke-width=".3"/>
+  <line x1="15" y1="100" x2="21" y2="100" stroke="#151515" stroke-width=".3"/>
+  <line x1="15" y1="200" x2="21" y2="200" stroke="#151515" stroke-width=".3"/>
+  <line x1="15" y1="300" x2="21" y2="300" stroke="#151515" stroke-width=".3"/>
+  <line x1="15" y1="400" x2="21" y2="400" stroke="#151515" stroke-width=".3"/>
+  <line x1="15" y1="500" x2="21" y2="500" stroke="#151515" stroke-width=".3"/>
 
-  <!-- ========== LEFT: TYPEWRITER INSIGHTS ========== -->
+  <!-- Center crosshair -->
+  <line x1="293" y1="298" x2="307" y2="298" stroke="#1a1a1a" stroke-width=".3" opacity=".3"/>
+  <line x1="300" y1="291" x2="300" y2="305" stroke="#1a1a1a" stroke-width=".3" opacity=".3"/>
 
   <!-- Section label -->
-  <line class="extLine" x1="55" y1="195" x2="330" y2="195"/>
-  <text x="55" y="190" class="subLabel" font-size="9" letter-spacing="0.3em" font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', monospace">THOUGHTS ON THE AI ERA</text>
+  <line class="extLine" x1="60" y1="200" x2="330" y2="200"/>
+  <text x="60" y="195" class="subLabel" font-size="8" letter-spacing=".35em">REFLECTIONS ON THE AI ERA</text>
 
-  <!-- Insight 1 -->
-  <text class="twText tw1" x="57" y="228">The best code is the one</text>
-
-  <!-- Insight 2 -->
-  <text class="twText tw2" x="57" y="273">Ship the prototype.</text>
-
-  <!-- Insight 3 -->
-  <text class="twText tw3" x="57" y="318">AI writes code.</text>
-
-  <!-- Insight sub-lines (same cycle) -->
-  <text class="twText tw1" x="57" y="248" style="font-size:14px;fill:#606060">you never write.</text>
-  <text class="twText tw2" x="57" y="293" style="font-size:14px;fill:#606060">Kill the roadmap.</text>
-  <text class="twText tw3" x="57" y="338" style="font-size:14px;fill:#606060">Humans write intent.</text>
-
-  <!-- Typewriter cursor (g=position, rect=blink) -->
-  <g class="twCursorWrap">
-    <rect class="twCursorRect" x="57" y="216" width="9" height="17" rx="1"/>
+  <!-- ============================================ -->
+  <!--  INSIGHT 1: Karpathy — vibe coding           -->
+  <!-- ============================================ -->
+  <g class="i1">
+    <text class="iFont" x="75" y="260">Forget the code exists.</text>
+    <text class="iFont" x="75" y="280">Give in to the vibes, embrace</text>
+    <text class="iFont" x="75" y="300">exponentials. See stuff, say stuff,</text>
+    <text class="iFont" x="75" y="320">run stuff. It mostly works.</text>
+    <text class="iAttr" x="75" y="348">— ANDREJ KARPATHY</text>
   </g>
+  <!-- Assemble particles I1 -->
+  <circle class="ap a1a" cx="130" cy="270" r="1.2"/><circle class="ap a1b" cx="250" cy="285" r="1"/>
+  <circle class="ap a1c" cx="370" cy="265" r="1.1"/><circle class="ap a1d" cx="180" cy="310" r=".9"/>
+  <circle class="ap a1e" cx="310" cy="330" r="1"/><circle class="ap a1f" cx="420" cy="295" r=".8"/>
+  <!-- Dissolve particles I1 -->
+  <circle class="dp d1a" cx="200" cy="280" r="1.2"/><circle class="dp d1b" cx="340" cy="270" r="1"/>
+  <circle class="dp d1c" cx="150" cy="310" r="1.1"/><circle class="dp d1d" cx="400" cy="295" r=".9"/>
+  <circle class="dp d1e" cx="270" cy="340" r="1"/><circle class="dp d1f" cx="100" cy="260" r=".8"/>
 
-  <!-- Dissolve particles for insight 1 -->
-  <g>
-    <circle class="dp b1a" cx="100" cy="235" r="1.2"/><circle class="dp b1b" cx="170" cy="228" r="1"/>
-    <circle class="dp b1c" cx="250" cy="240" r="1.3"/><circle class="dp b1d" cx="330" cy="232" r="0.9"/>
-    <circle class="dp b1e" cx="140" cy="242" r="1.1"/><circle class="dp b1f" cx="380" cy="226" r="1"/>
-    <circle class="dp b1g" cx="210" cy="245" r="1.2"/><circle class="dp b1h" cx="440" cy="235" r="0.8"/>
+  <!-- ============================================ -->
+  <!--  INSIGHT 2: Willison — context engineering    -->
+  <!-- ============================================ -->
+  <g class="i2">
+    <text class="iFont" x="75" y="260">The craft of AI-driven development</text>
+    <text class="iFont" x="75" y="280">is context engineering. Every token</text>
+    <text class="iFont" x="75" y="300">in the window shapes behavior.</text>
+    <text class="iFont" x="75" y="320">Prune ruthlessly. Add with intent.</text>
+    <text class="iAttr" x="75" y="348">— SIMON WILLISON</text>
   </g>
+  <circle class="ap a2a" cx="130" cy="270" r="1.2"/><circle class="ap a2b" cx="250" cy="285" r="1"/>
+  <circle class="ap a2c" cx="370" cy="265" r="1.1"/><circle class="ap a2d" cx="180" cy="310" r=".9"/>
+  <circle class="ap a2e" cx="310" cy="330" r="1"/><circle class="ap a2f" cx="420" cy="295" r=".8"/>
+  <circle class="dp d2a" cx="200" cy="280" r="1.2"/><circle class="dp d2b" cx="340" cy="270" r="1"/>
+  <circle class="dp d2c" cx="150" cy="310" r="1.1"/><circle class="dp d2d" cx="400" cy="295" r=".9"/>
+  <circle class="dp d2e" cx="270" cy="340" r="1"/><circle class="dp d2f" cx="100" cy="260" r=".8"/>
 
-  <!-- Dissolve particles for insight 2 -->
-  <g>
-    <circle class="dp b2a" cx="100" cy="280" r="1.2"/><circle class="dp b2b" cx="170" cy="273" r="1"/>
-    <circle class="dp b2c" cx="250" cy="285" r="1.3"/><circle class="dp b2d" cx="330" cy="277" r="0.9"/>
-    <circle class="dp b2e" cx="140" cy="287" r="1.1"/><circle class="dp b2f" cx="380" cy="271" r="1"/>
-    <circle class="dp b2g" cx="210" cy="290" r="1.2"/><circle class="dp b2h" cx="440" cy="280" r="0.8"/>
+  <!-- ============================================ -->
+  <!--  INSIGHT 3: spec-driven development           -->
+  <!-- ============================================ -->
+  <g class="i3">
+    <text class="iFont" x="75" y="260">If the prompt is not testable,</text>
+    <text class="iFont" x="75" y="280">it is not a specification.</text>
+    <text class="iFont" x="75" y="300">The harness iterates. The model</text>
+    <text class="iFont" x="75" y="320">compiles intent into execution.</text>
+    <text class="iAttr" x="75" y="348">— SPEC-DRIVEN DEVELOPMENT</text>
   </g>
+  <circle class="ap a3a" cx="130" cy="270" r="1.2"/><circle class="ap a3b" cx="250" cy="285" r="1"/>
+  <circle class="ap a3c" cx="370" cy="265" r="1.1"/><circle class="ap a3d" cx="180" cy="310" r=".9"/>
+  <circle class="ap a3e" cx="310" cy="330" r="1"/><circle class="ap a3f" cx="420" cy="295" r=".8"/>
+  <circle class="dp d3a" cx="200" cy="280" r="1.2"/><circle class="dp d3b" cx="340" cy="270" r="1"/>
+  <circle class="dp d3c" cx="150" cy="310" r="1.1"/><circle class="dp d3d" cx="400" cy="295" r=".9"/>
+  <circle class="dp d3e" cx="270" cy="340" r="1"/><circle class="dp d3f" cx="100" cy="260" r=".8"/>
 
-  <!-- Dissolve particles for insight 3 -->
-  <g>
-    <circle class="dp b3a" cx="100" cy="325" r="1.2"/><circle class="dp b3b" cx="170" cy="318" r="1"/>
-    <circle class="dp b3c" cx="250" cy="330" r="1.3"/><circle class="dp b3d" cx="330" cy="322" r="0.9"/>
-    <circle class="dp b3e" cx="140" cy="332" r="1.1"/><circle class="dp b3f" cx="380" cy="316" r="1"/>
-    <circle class="dp b3g" cx="210" cy="335" r="1.2"/><circle class="dp b3h" cx="440" cy="325" r="0.8"/>
+  <!-- ============================================ -->
+  <!--  INSIGHT 4: the new role                      -->
+  <!-- ============================================ -->
+  <g class="i4">
+    <text class="iFont" x="75" y="260">Stop calling yourself a coder.</text>
+    <text class="iFont" x="75" y="280">You are the architect now.</text>
+    <text class="iFont" x="75" y="300">The frontier model is your crew.</text>
+    <text class="iFont" x="75" y="320">Ship constraints, not keystrokes.</text>
+    <text class="iAttr" x="75" y="348">— THE BUILDER MANIFESTO</text>
   </g>
+  <circle class="ap a4a" cx="130" cy="270" r="1.2"/><circle class="ap a4b" cx="250" cy="285" r="1"/>
+  <circle class="ap a4c" cx="370" cy="265" r="1.1"/><circle class="ap a4d" cx="180" cy="310" r=".9"/>
+  <circle class="ap a4e" cx="310" cy="330" r="1"/><circle class="ap a4f" cx="420" cy="295" r=".8"/>
+  <circle class="dp d4a" cx="200" cy="280" r="1.2"/><circle class="dp d4b" cx="340" cy="270" r="1"/>
+  <circle class="dp d4c" cx="150" cy="310" r="1.1"/><circle class="dp d4d" cx="400" cy="295" r=".9"/>
+  <circle class="dp d4e" cx="270" cy="340" r="1"/><circle class="dp d4f" cx="100" cy="260" r=".8"/>
 
   <!-- Bottom labels -->
-  <text x="60" y="530" class="subLabel" font-size="10" letter-spacing="0.35em">DIGITAL ATELIER</text>
-  <text x="60" y="550" class="subMono" font-size="9" letter-spacing="0.2em">EST. 2026</text>
+  <text x="60" y="530" class="subLabel" font-size="10" letter-spacing=".35em">DIGITAL ATELIER</text>
+  <text x="60" y="550" class="subMono" letter-spacing=".2em">EST. 2026</text>
 
-  <!-- ========== RIGHT: SIGNATURE D1 MONOGRAM ========== -->
-  <!-- Luxury calligraphic "D1" — sweeping italic strokes with flourish -->
-  <g transform="translate(620, 60) scale(3.8)">
+  <!-- ============================================ -->
+  <!--  RIGHT: ANGULAR BLADE-CUT D1 MONOGRAM        -->
+  <!--  Faceted, sharp, no curves — precision cut    -->
+  <!-- ============================================ -->
+  <g transform="translate(640, 55) scale(4.2)">
+    <!-- D: angular faceted letterform with cut counter -->
     <path class="sig" fill-rule="evenodd" d="
-      M 8,108
-      C 8,108 6,95 8,75
-      C 10,55 14,30 20,18
-      C 26,6 35,2 48,4
-      C 61,6 78,16 88,32
-      C 98,48 102,70 100,88
-      C 98,106 88,118 72,122
-      C 56,126 38,120 24,112
-      C 16,107 10,100 8,108
-      Z
-      M 30,30
-      C 38,22 50,20 60,28
-      C 70,36 76,52 76,68
-      C 76,84 70,98 58,104
-      C 46,110 34,106 28,96
-      C 22,86 22,68 26,52
-      C 28,42 30,34 30,30
-      Z
+      M 10,5 L 60,5 L 85,15 L 100,40 L 105,65 L 100,90 L 85,110 L 60,120 L 10,120 Z
+      M 25,20 L 55,20 L 72,28 L 82,45 L 85,65 L 82,85 L 72,97 L 55,105 L 25,105 Z
     "/>
+    <!-- 1: sharp geometric with blade serif -->
     <path class="sig" d="
-      M 120,6
-      C 118,4 116,2 120,2
-      L 130,2
-      C 132,2 132,4 130,6
-      L 126,22
-      L 126,100
-      C 126,102 128,104 132,104
-      L 142,104
-      C 144,104 144,106 144,108
-      L 144,112
-      C 144,114 142,114 140,114
-      L 112,114
-      C 110,114 110,112 110,110
-      L 110,108
-      C 110,106 112,104 114,104
-      L 122,104
-      C 124,104 124,102 124,100
-      L 124,22
-      L 114,34
-      C 112,36 110,34 110,32
-      Z
+      M 128,5 L 140,5 L 140,105 L 155,105 L 155,120 L 115,120 L 115,105 L 130,105 L 130,22 L 118,32 L 112,24 Z
     "/>
   </g>
 
-  <!-- Monogram subtle underline flourish -->
-  <line x1="680" y1="500" x2="1120" y2="500" stroke="#1e1e1e" stroke-width="0.5" opacity="0.3"/>
+  <!-- Subtle underline -->
+  <line x1="680" y1="530" x2="1120" y2="530" stroke="#1a1a1a" stroke-width=".5" opacity=".25"/>
 
-  <!-- Monogram edge glow -->
-  <path class="monoEdge" d="M 650 300 C 650 200 700 100 800 80" stroke-width="1"/>
+  <!-- Monogram edge accent -->
+  <path class="monoEdge" d="M 1082 290 L 1082 520"/>
 
   <!-- Scanlines -->
   <rect class="scan" x="0" y="0" width="100%" height="1"/>
