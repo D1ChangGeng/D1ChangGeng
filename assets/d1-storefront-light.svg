@@ -10,43 +10,88 @@
 
   <style>
     /* ============================== */
-    /*  INSIGHT CYCLE: 32s total      */
-    /*  4 insights x 8s each          */
-    /*  Each: 0-2.5s assemble         */
-    /*        2.5-5.5s hold           */
-    /*        5.5-7s dissolve         */
-    /*        7-8s empty              */
+    /*  INSIGHT CYCLE: 48s total      */
+    /*  4 insights x 12s each         */
+    /*  Per insight (% of 25% slot):  */
+    /*    0-4%  assemble particles    */
+    /*    3-5%  text fade in          */
+    /*    5-18% text hold             */
+    /*    18-21% text fade out        */
+    /*    19-24% dissolve particles   */
+    /*    24-25% empty gap            */
     /* ============================== */
 
-    /* Insight visibility (opacity in/out) */
-    @keyframes ins1 {
-      0%{opacity:0} 3%{opacity:0} 5%{opacity:1} 18%{opacity:1} 22%{opacity:0} 100%{opacity:0}
-    }
-    @keyframes ins2 {
-      0%{opacity:0} 28%{opacity:0} 30%{opacity:1} 43%{opacity:1} 47%{opacity:0} 100%{opacity:0}
-    }
-    @keyframes ins3 {
-      0%{opacity:0} 53%{opacity:0} 55%{opacity:1} 68%{opacity:1} 72%{opacity:0} 100%{opacity:0}
-    }
-    @keyframes ins4 {
-      0%{opacity:0} 78%{opacity:0} 80%{opacity:1} 93%{opacity:1} 97%{opacity:0} 100%{opacity:0}
-    }
+    /* Insight 1: 0-25% */
+    @keyframes ins1{0%{opacity:0}3%{opacity:0}5%{opacity:1}18%{opacity:1}21%{opacity:0}100%{opacity:0}}
+    /* Insight 2: 25-50% */
+    @keyframes ins2{0%{opacity:0}28%{opacity:0}30%{opacity:1}43%{opacity:1}46%{opacity:0}100%{opacity:0}}
+    /* Insight 3: 50-75% */
+    @keyframes ins3{0%{opacity:0}53%{opacity:0}55%{opacity:1}68%{opacity:1}71%{opacity:0}100%{opacity:0}}
+    /* Insight 4: 75-100% */
+    @keyframes ins4{0%{opacity:0}78%{opacity:0}80%{opacity:1}93%{opacity:1}96%{opacity:0}100%{opacity:0}}
 
-    /* Particle ASSEMBLE: scattered → converge to origin */
-    @keyframes pa1{0%{transform:translate(45,-30);opacity:0}4%{opacity:.6}8%{transform:translate(0,0);opacity:.7}10%{opacity:0}100%{opacity:0}}
-    @keyframes pa2{0%{transform:translate(-35,40);opacity:0}4%{opacity:.5}8%{transform:translate(0,0);opacity:.6}10%{opacity:0}100%{opacity:0}}
-    @keyframes pa3{0%{transform:translate(55,25);opacity:0}4%{opacity:.5}8%{transform:translate(0,0);opacity:.6}10%{opacity:0}100%{opacity:0}}
-    @keyframes pa4{0%{transform:translate(-50,-35);opacity:0}4%{opacity:.4}8%{transform:translate(0,0);opacity:.5}10%{opacity:0}100%{opacity:0}}
-    @keyframes pa5{0%{transform:translate(30,45);opacity:0}4%{opacity:.5}8%{transform:translate(0,0);opacity:.5}10%{opacity:0}100%{opacity:0}}
-    @keyframes pa6{0%{transform:translate(-40,-20);opacity:0}4%{opacity:.6}8%{transform:translate(0,0);opacity:.6}10%{opacity:0}100%{opacity:0}}
+    /* ASSEMBLE particles: converge just before text appears */
+    /* Insight 1 assemble: 0-5% */
+    @keyframes a1p1{0%{transform:translate(45,-30);opacity:0}2%{opacity:.6}5%{transform:translate(0,0);opacity:.5}6%{opacity:0}100%{opacity:0}}
+    @keyframes a1p2{0%{transform:translate(-35,40);opacity:0}2%{opacity:.5}5%{transform:translate(0,0);opacity:.4}6%{opacity:0}100%{opacity:0}}
+    @keyframes a1p3{0%{transform:translate(55,25);opacity:0}2%{opacity:.5}5%{transform:translate(0,0);opacity:.4}6%{opacity:0}100%{opacity:0}}
+    @keyframes a1p4{0%{transform:translate(-50,-35);opacity:0}2%{opacity:.4}5%{transform:translate(0,0);opacity:.3}6%{opacity:0}100%{opacity:0}}
+    @keyframes a1p5{0%{transform:translate(30,45);opacity:0}2%{opacity:.5}5%{transform:translate(0,0);opacity:.4}6%{opacity:0}100%{opacity:0}}
+    @keyframes a1p6{0%{transform:translate(-40,-20);opacity:0}2%{opacity:.6}5%{transform:translate(0,0);opacity:.5}6%{opacity:0}100%{opacity:0}}
+    /* Insight 2 assemble: 25-30% */
+    @keyframes a2p1{0%{opacity:0}25%{transform:translate(45,-30);opacity:0}27%{opacity:.6}30%{transform:translate(0,0);opacity:.5}31%{opacity:0}100%{opacity:0}}
+    @keyframes a2p2{0%{opacity:0}25%{transform:translate(-35,40);opacity:0}27%{opacity:.5}30%{transform:translate(0,0);opacity:.4}31%{opacity:0}100%{opacity:0}}
+    @keyframes a2p3{0%{opacity:0}25%{transform:translate(55,25);opacity:0}27%{opacity:.5}30%{transform:translate(0,0);opacity:.4}31%{opacity:0}100%{opacity:0}}
+    @keyframes a2p4{0%{opacity:0}25%{transform:translate(-50,-35);opacity:0}27%{opacity:.4}30%{transform:translate(0,0);opacity:.3}31%{opacity:0}100%{opacity:0}}
+    @keyframes a2p5{0%{opacity:0}25%{transform:translate(30,45);opacity:0}27%{opacity:.5}30%{transform:translate(0,0);opacity:.4}31%{opacity:0}100%{opacity:0}}
+    @keyframes a2p6{0%{opacity:0}25%{transform:translate(-40,-20);opacity:0}27%{opacity:.6}30%{transform:translate(0,0);opacity:.5}31%{opacity:0}100%{opacity:0}}
+    /* Insight 3 assemble: 50-55% */
+    @keyframes a3p1{0%{opacity:0}50%{transform:translate(45,-30);opacity:0}52%{opacity:.6}55%{transform:translate(0,0);opacity:.5}56%{opacity:0}100%{opacity:0}}
+    @keyframes a3p2{0%{opacity:0}50%{transform:translate(-35,40);opacity:0}52%{opacity:.5}55%{transform:translate(0,0);opacity:.4}56%{opacity:0}100%{opacity:0}}
+    @keyframes a3p3{0%{opacity:0}50%{transform:translate(55,25);opacity:0}52%{opacity:.5}55%{transform:translate(0,0);opacity:.4}56%{opacity:0}100%{opacity:0}}
+    @keyframes a3p4{0%{opacity:0}50%{transform:translate(-50,-35);opacity:0}52%{opacity:.4}55%{transform:translate(0,0);opacity:.3}56%{opacity:0}100%{opacity:0}}
+    @keyframes a3p5{0%{opacity:0}50%{transform:translate(30,45);opacity:0}52%{opacity:.5}55%{transform:translate(0,0);opacity:.4}56%{opacity:0}100%{opacity:0}}
+    @keyframes a3p6{0%{opacity:0}50%{transform:translate(-40,-20);opacity:0}52%{opacity:.6}55%{transform:translate(0,0);opacity:.5}56%{opacity:0}100%{opacity:0}}
+    /* Insight 4 assemble: 75-80% */
+    @keyframes a4p1{0%{opacity:0}75%{transform:translate(45,-30);opacity:0}77%{opacity:.6}80%{transform:translate(0,0);opacity:.5}81%{opacity:0}100%{opacity:0}}
+    @keyframes a4p2{0%{opacity:0}75%{transform:translate(-35,40);opacity:0}77%{opacity:.5}80%{transform:translate(0,0);opacity:.4}81%{opacity:0}100%{opacity:0}}
+    @keyframes a4p3{0%{opacity:0}75%{transform:translate(55,25);opacity:0}77%{opacity:.5}80%{transform:translate(0,0);opacity:.4}81%{opacity:0}100%{opacity:0}}
+    @keyframes a4p4{0%{opacity:0}75%{transform:translate(-50,-35);opacity:0}77%{opacity:.4}80%{transform:translate(0,0);opacity:.3}81%{opacity:0}100%{opacity:0}}
+    @keyframes a4p5{0%{opacity:0}75%{transform:translate(30,45);opacity:0}77%{opacity:.5}80%{transform:translate(0,0);opacity:.4}81%{opacity:0}100%{opacity:0}}
+    @keyframes a4p6{0%{opacity:0}75%{transform:translate(-40,-20);opacity:0}77%{opacity:.6}80%{transform:translate(0,0);opacity:.5}81%{opacity:0}100%{opacity:0}}
 
-    /* Particle DISSOLVE: origin → scatter outward */
-    @keyframes pd1{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.7}28%{opacity:0;transform:translate(50,-35)}100%{opacity:0}}
-    @keyframes pd2{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.6}29%{opacity:0;transform:translate(-40,30)}100%{opacity:0}}
-    @keyframes pd3{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.5}27%{opacity:0;transform:translate(60,20)}100%{opacity:0}}
-    @keyframes pd4{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.6}30%{opacity:0;transform:translate(-55,-25)}100%{opacity:0}}
-    @keyframes pd5{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.5}26%{opacity:0;transform:translate(35,40)}100%{opacity:0}}
-    @keyframes pd6{0%{opacity:0}20%{opacity:0;transform:translate(0,0)}22%{opacity:.4}31%{opacity:0;transform:translate(-30,-40)}100%{opacity:0}}
+    /* DISSOLVE particles: scatter when text fades out */
+    /* Insight 1 dissolve: 19-25% */
+    @keyframes d1p1{0%{opacity:0}19%{opacity:0;transform:translate(0,0)}20%{opacity:.6}24%{opacity:0;transform:translate(50,-35)}100%{opacity:0}}
+    @keyframes d1p2{0%{opacity:0}19%{opacity:0;transform:translate(0,0)}20%{opacity:.5}25%{opacity:0;transform:translate(-40,30)}100%{opacity:0}}
+    @keyframes d1p3{0%{opacity:0}19%{opacity:0;transform:translate(0,0)}20%{opacity:.5}23%{opacity:0;transform:translate(60,20)}100%{opacity:0}}
+    @keyframes d1p4{0%{opacity:0}19%{opacity:0;transform:translate(0,0)}20%{opacity:.4}25%{opacity:0;transform:translate(-55,-25)}100%{opacity:0}}
+    @keyframes d1p5{0%{opacity:0}19%{opacity:0;transform:translate(0,0)}20%{opacity:.5}22%{opacity:0;transform:translate(35,40)}100%{opacity:0}}
+    @keyframes d1p6{0%{opacity:0}19%{opacity:0;transform:translate(0,0)}20%{opacity:.4}24%{opacity:0;transform:translate(-30,-40)}100%{opacity:0}}
+    /* Insight 2 dissolve: 44-50% */
+    @keyframes d2p1{0%{opacity:0}44%{opacity:0;transform:translate(0,0)}45%{opacity:.6}49%{opacity:0;transform:translate(50,-35)}100%{opacity:0}}
+    @keyframes d2p2{0%{opacity:0}44%{opacity:0;transform:translate(0,0)}45%{opacity:.5}50%{opacity:0;transform:translate(-40,30)}100%{opacity:0}}
+    @keyframes d2p3{0%{opacity:0}44%{opacity:0;transform:translate(0,0)}45%{opacity:.5}48%{opacity:0;transform:translate(60,20)}100%{opacity:0}}
+    @keyframes d2p4{0%{opacity:0}44%{opacity:0;transform:translate(0,0)}45%{opacity:.4}50%{opacity:0;transform:translate(-55,-25)}100%{opacity:0}}
+    @keyframes d2p5{0%{opacity:0}44%{opacity:0;transform:translate(0,0)}45%{opacity:.5}47%{opacity:0;transform:translate(35,40)}100%{opacity:0}}
+    @keyframes d2p6{0%{opacity:0}44%{opacity:0;transform:translate(0,0)}45%{opacity:.4}49%{opacity:0;transform:translate(-30,-40)}100%{opacity:0}}
+    /* Insight 3 dissolve: 69-75% */
+    @keyframes d3p1{0%{opacity:0}69%{opacity:0;transform:translate(0,0)}70%{opacity:.6}74%{opacity:0;transform:translate(50,-35)}100%{opacity:0}}
+    @keyframes d3p2{0%{opacity:0}69%{opacity:0;transform:translate(0,0)}70%{opacity:.5}75%{opacity:0;transform:translate(-40,30)}100%{opacity:0}}
+    @keyframes d3p3{0%{opacity:0}69%{opacity:0;transform:translate(0,0)}70%{opacity:.5}73%{opacity:0;transform:translate(60,20)}100%{opacity:0}}
+    @keyframes d3p4{0%{opacity:0}69%{opacity:0;transform:translate(0,0)}70%{opacity:.4}75%{opacity:0;transform:translate(-55,-25)}100%{opacity:0}}
+    @keyframes d3p5{0%{opacity:0}69%{opacity:0;transform:translate(0,0)}70%{opacity:.5}72%{opacity:0;transform:translate(35,40)}100%{opacity:0}}
+    @keyframes d3p6{0%{opacity:0}69%{opacity:0;transform:translate(0,0)}70%{opacity:.4}74%{opacity:0;transform:translate(-30,-40)}100%{opacity:0}}
+    /* Insight 4 dissolve: 94-100% */
+    @keyframes d4p1{0%{opacity:0}94%{opacity:0;transform:translate(0,0)}95%{opacity:.6}99%{opacity:0;transform:translate(50,-35)}100%{opacity:0}}
+    @keyframes d4p2{0%{opacity:0}94%{opacity:0;transform:translate(0,0)}95%{opacity:.5}100%{opacity:0;transform:translate(-40,30)}}
+    @keyframes d4p3{0%{opacity:0}94%{opacity:0;transform:translate(0,0)}95%{opacity:.5}98%{opacity:0;transform:translate(60,20)}100%{opacity:0}}
+    @keyframes d4p4{0%{opacity:0}94%{opacity:0;transform:translate(0,0)}95%{opacity:.4}100%{opacity:0;transform:translate(-55,-25)}}
+    @keyframes d4p5{0%{opacity:0}94%{opacity:0;transform:translate(0,0)}95%{opacity:.5}97%{opacity:0;transform:translate(35,40)}100%{opacity:0}}
+    @keyframes d4p6{0%{opacity:0}94%{opacity:0;transform:translate(0,0)}95%{opacity:.4}99%{opacity:0;transform:translate(-30,-40)}100%{opacity:0}}
+
+    /* Signature fade-in */
+    @keyframes sigReveal{0%{opacity:0}100%{opacity:1}}
 
     /* Ambient */
     @keyframes scanline{0%{transform:translateY(-2);opacity:0}8%{opacity:.2}92%{opacity:.2}100%{transform:translateY(600);opacity:0}}
@@ -54,7 +99,6 @@
     @keyframes pulse{0%,100%{opacity:.3}50%{opacity:.75}}
     @keyframes breathe{0%,100%{opacity:.4}50%{opacity:.8}}
     @keyframes extendLine{0%{stroke-dashoffset:270}40%{stroke-dashoffset:0}60%{stroke-dashoffset:0}100%{stroke-dashoffset:-270}}
-    @keyframes sigFill{0%,50%{fill-opacity:0}75%{fill-opacity:1}100%{fill-opacity:1}}
 
     /* Base */
     .bg{fill:#fafafa}
@@ -70,35 +114,35 @@
     .iFont{font-family:'JetBrains Mono','Fira Code','SF Mono','Courier New',monospace;font-size:15px;fill:#555;letter-spacing:.01em}
     .iSub{font-family:'JetBrains Mono','Fira Code','SF Mono','Courier New',monospace;font-size:11px;fill:#555;letter-spacing:.02em}
     .iAttr{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:9px;fill:#bbb;letter-spacing:.15em;font-weight:300}
-    .i1{animation:ins1 32s linear infinite}
-    .i2{animation:ins2 32s linear infinite}
-    .i3{animation:ins3 32s linear infinite}
-    .i4{animation:ins4 32s linear infinite}
+    .i1{animation:ins1 48s linear infinite}
+    .i2{animation:ins2 48s linear infinite}
+    .i3{animation:ins3 48s linear infinite}
+    .i4{animation:ins4 48s linear infinite}
 
-    /* Assemble particles per insight */
+    /* Assemble particles — each insight has its own synced keyframes */
     .ap{fill:#aaa}
-    .a1a{animation:pa1 32s linear infinite}.a1b{animation:pa2 32s linear infinite}.a1c{animation:pa3 32s linear infinite}
-    .a1d{animation:pa4 32s linear infinite}.a1e{animation:pa5 32s linear infinite}.a1f{animation:pa6 32s linear infinite}
-    .a2a{animation:pa1 32s linear infinite;animation-delay:8s}.a2b{animation:pa2 32s linear infinite;animation-delay:8s}.a2c{animation:pa3 32s linear infinite;animation-delay:8s}
-    .a2d{animation:pa4 32s linear infinite;animation-delay:8s}.a2e{animation:pa5 32s linear infinite;animation-delay:8s}.a2f{animation:pa6 32s linear infinite;animation-delay:8s}
-    .a3a{animation:pa1 32s linear infinite;animation-delay:16s}.a3b{animation:pa2 32s linear infinite;animation-delay:16s}.a3c{animation:pa3 32s linear infinite;animation-delay:16s}
-    .a3d{animation:pa4 32s linear infinite;animation-delay:16s}.a3e{animation:pa5 32s linear infinite;animation-delay:16s}.a3f{animation:pa6 32s linear infinite;animation-delay:16s}
-    .a4a{animation:pa1 32s linear infinite;animation-delay:24s}.a4b{animation:pa2 32s linear infinite;animation-delay:24s}.a4c{animation:pa3 32s linear infinite;animation-delay:24s}
-    .a4d{animation:pa4 32s linear infinite;animation-delay:24s}.a4e{animation:pa5 32s linear infinite;animation-delay:24s}.a4f{animation:pa6 32s linear infinite;animation-delay:24s}
+    .a1a{animation:a1p1 48s linear infinite}.a1b{animation:a1p2 48s linear infinite}.a1c{animation:a1p3 48s linear infinite}
+    .a1d{animation:a1p4 48s linear infinite}.a1e{animation:a1p5 48s linear infinite}.a1f{animation:a1p6 48s linear infinite}
+    .a2a{animation:a2p1 48s linear infinite}.a2b{animation:a2p2 48s linear infinite}.a2c{animation:a2p3 48s linear infinite}
+    .a2d{animation:a2p4 48s linear infinite}.a2e{animation:a2p5 48s linear infinite}.a2f{animation:a2p6 48s linear infinite}
+    .a3a{animation:a3p1 48s linear infinite}.a3b{animation:a3p2 48s linear infinite}.a3c{animation:a3p3 48s linear infinite}
+    .a3d{animation:a3p4 48s linear infinite}.a3e{animation:a3p5 48s linear infinite}.a3f{animation:a3p6 48s linear infinite}
+    .a4a{animation:a4p1 48s linear infinite}.a4b{animation:a4p2 48s linear infinite}.a4c{animation:a4p3 48s linear infinite}
+    .a4d{animation:a4p4 48s linear infinite}.a4e{animation:a4p5 48s linear infinite}.a4f{animation:a4p6 48s linear infinite}
 
-    /* Dissolve particles per insight */
+    /* Dissolve particles — each insight has its own synced keyframes */
     .dp{fill:#aaa}
-    .d1a{animation:pd1 32s linear infinite}.d1b{animation:pd2 32s linear infinite}.d1c{animation:pd3 32s linear infinite}
-    .d1d{animation:pd4 32s linear infinite}.d1e{animation:pd5 32s linear infinite}.d1f{animation:pd6 32s linear infinite}
-    .d2a{animation:pd1 32s linear infinite;animation-delay:8s}.d2b{animation:pd2 32s linear infinite;animation-delay:8s}.d2c{animation:pd3 32s linear infinite;animation-delay:8s}
-    .d2d{animation:pd4 32s linear infinite;animation-delay:8s}.d2e{animation:pd5 32s linear infinite;animation-delay:8s}.d2f{animation:pd6 32s linear infinite;animation-delay:8s}
-    .d3a{animation:pd1 32s linear infinite;animation-delay:16s}.d3b{animation:pd2 32s linear infinite;animation-delay:16s}.d3c{animation:pd3 32s linear infinite;animation-delay:16s}
-    .d3d{animation:pd4 32s linear infinite;animation-delay:16s}.d3e{animation:pd5 32s linear infinite;animation-delay:16s}.d3f{animation:pd6 32s linear infinite;animation-delay:16s}
-    .d4a{animation:pd1 32s linear infinite;animation-delay:24s}.d4b{animation:pd2 32s linear infinite;animation-delay:24s}.d4c{animation:pd3 32s linear infinite;animation-delay:24s}
-    .d4d{animation:pd4 32s linear infinite;animation-delay:24s}.d4e{animation:pd5 32s linear infinite;animation-delay:24s}.d4f{animation:pd6 32s linear infinite;animation-delay:24s}
+    .d1a{animation:d1p1 48s linear infinite}.d1b{animation:d1p2 48s linear infinite}.d1c{animation:d1p3 48s linear infinite}
+    .d1d{animation:d1p4 48s linear infinite}.d1e{animation:d1p5 48s linear infinite}.d1f{animation:d1p6 48s linear infinite}
+    .d2a{animation:d2p1 48s linear infinite}.d2b{animation:d2p2 48s linear infinite}.d2c{animation:d2p3 48s linear infinite}
+    .d2d{animation:d2p4 48s linear infinite}.d2e{animation:d2p5 48s linear infinite}.d2f{animation:d2p6 48s linear infinite}
+    .d3a{animation:d3p1 48s linear infinite}.d3b{animation:d3p2 48s linear infinite}.d3c{animation:d3p3 48s linear infinite}
+    .d3d{animation:d3p4 48s linear infinite}.d3e{animation:d3p5 48s linear infinite}.d3f{animation:d3p6 48s linear infinite}
+    .d4a{animation:d4p1 48s linear infinite}.d4b{animation:d4p2 48s linear infinite}.d4c{animation:d4p3 48s linear infinite}
+    .d4d{animation:d4p4 48s linear infinite}.d4e{animation:d4p5 48s linear infinite}.d4f{animation:d4p6 48s linear infinite}
 
-    /* Dancing Script signature — filled paths (no stroke animation needed) */
-    .sigWrap{fill:#1a1a1a;opacity:0;animation:sigFill 4s ease forwards}
+    /* Dancing Script signature */
+    .sigWrap{fill:#1a1a1a;opacity:0;animation:sigReveal 4s ease 1s forwards}
     .monoEdge{fill:none;stroke:#1a1a1a;stroke-width:.4;animation:pulse 8s ease-in-out infinite}
   </style>
 
