@@ -82,14 +82,33 @@
       100% { opacity: 0; }
     }
 
-    /* Cursor position follows active insight */
+    /* Cursor tracks typewriter horizontally + jumps between lines */
     @keyframes cursorCycle {
-      0%, 27.1% { opacity: 1; transform: translateY(0); }
-      27.2%, 33.2% { opacity: 0; }
-      33.3%, 60.4% { opacity: 1; transform: translateY(45px); }
-      60.5%, 66.5% { opacity: 0; }
-      66.6%, 93.7% { opacity: 1; transform: translateY(90px); }
-      93.8%, 100% { opacity: 0; }
+      /* Insight 1: type in (0-12.5%), hold (12.5-22.9%), fade (22.9-27.1%) */
+      0%    { transform: translate(0, 0); opacity: 1; }
+      1%    { transform: translate(0, 0); opacity: 1; }
+      12.5% { transform: translate(370px, 0); opacity: 1; }
+      22.9% { transform: translate(370px, 0); opacity: 1; }
+      27.1% { transform: translate(370px, 0); opacity: 0; }
+      /* Gap */
+      27.2% { transform: translate(0, 45px); opacity: 0; }
+      33.2% { transform: translate(0, 45px); opacity: 0; }
+      /* Insight 2: type in (33.3-45.8%), hold (45.8-56.2%), fade (56.2-60.4%) */
+      33.3% { transform: translate(0, 45px); opacity: 1; }
+      45.8% { transform: translate(310px, 45px); opacity: 1; }
+      56.2% { transform: translate(310px, 45px); opacity: 1; }
+      60.4% { transform: translate(310px, 45px); opacity: 0; }
+      /* Gap */
+      60.5% { transform: translate(0, 90px); opacity: 0; }
+      66.5% { transform: translate(0, 90px); opacity: 0; }
+      /* Insight 3: type in (66.6-79.1%), hold (79.1-89.6%), fade (89.6-93.7%) */
+      66.6% { transform: translate(0, 90px); opacity: 1; }
+      79.1% { transform: translate(250px, 90px); opacity: 1; }
+      89.6% { transform: translate(250px, 90px); opacity: 1; }
+      93.7% { transform: translate(250px, 90px); opacity: 0; }
+      /* Reset gap */
+      93.8% { transform: translate(0, 0); opacity: 0; }
+      100%  { transform: translate(0, 0); opacity: 0; }
     }
 
     /* ======================== */
