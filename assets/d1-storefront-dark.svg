@@ -87,25 +87,25 @@
       /* Insight 1: type in (0-12.5%), hold (12.5-22.9%), fade (22.9-27.1%) */
       0%    { transform: translate(0, 0); opacity: 1; }
       1%    { transform: translate(0, 0); opacity: 1; }
-      12.5% { transform: translate(370px, 0); opacity: 1; }
-      22.9% { transform: translate(370px, 0); opacity: 1; }
-      27.1% { transform: translate(370px, 0); opacity: 0; }
+      12.5% { transform: translate(370, 0); opacity: 1; }
+      22.9% { transform: translate(370, 0); opacity: 1; }
+      27.1% { transform: translate(370, 0); opacity: 0; }
       /* Gap */
-      27.2% { transform: translate(0, 45px); opacity: 0; }
-      33.2% { transform: translate(0, 45px); opacity: 0; }
+      27.2% { transform: translate(0, 45); opacity: 0; }
+      33.2% { transform: translate(0, 45); opacity: 0; }
       /* Insight 2: type in (33.3-45.8%), hold (45.8-56.2%), fade (56.2-60.4%) */
-      33.3% { transform: translate(0, 45px); opacity: 1; }
-      45.8% { transform: translate(310px, 45px); opacity: 1; }
-      56.2% { transform: translate(310px, 45px); opacity: 1; }
-      60.4% { transform: translate(310px, 45px); opacity: 0; }
+      33.3% { transform: translate(0, 45); opacity: 1; }
+      45.8% { transform: translate(310, 45); opacity: 1; }
+      56.2% { transform: translate(310, 45); opacity: 1; }
+      60.4% { transform: translate(310, 45); opacity: 0; }
       /* Gap */
-      60.5% { transform: translate(0, 90px); opacity: 0; }
-      66.5% { transform: translate(0, 90px); opacity: 0; }
+      60.5% { transform: translate(0, 90); opacity: 0; }
+      66.5% { transform: translate(0, 90); opacity: 0; }
       /* Insight 3: type in (66.6-79.1%), hold (79.1-89.6%), fade (89.6-93.7%) */
-      66.6% { transform: translate(0, 90px); opacity: 1; }
-      79.1% { transform: translate(250px, 90px); opacity: 1; }
-      89.6% { transform: translate(250px, 90px); opacity: 1; }
-      93.7% { transform: translate(250px, 90px); opacity: 0; }
+      66.6% { transform: translate(0, 90); opacity: 1; }
+      79.1% { transform: translate(250, 90); opacity: 1; }
+      89.6% { transform: translate(250, 90); opacity: 1; }
+      93.7% { transform: translate(250, 90); opacity: 0; }
       /* Reset gap */
       93.8% { transform: translate(0, 0); opacity: 0; }
       100%  { transform: translate(0, 0); opacity: 0; }
@@ -191,8 +191,9 @@
     .tw2 { fill: #8a8a8a; clip-path: url(#tw2); animation: twOpacity2 24s linear infinite; }
     .tw3 { fill: #8a8a8a; clip-path: url(#tw3); animation: twOpacity3 24s linear infinite; }
 
-    /* Typewriter cursor */
-    .twCursor { fill: #8a8a8a; animation: blink 0.8s step-end infinite, cursorCycle 24s linear infinite; width: 9px; height: 17px; }
+    /* Typewriter cursor — blink on rect, position on wrapper g */
+    .twCursorWrap { animation: cursorCycle 24s linear infinite; }
+    .twCursorRect { fill: #8a8a8a; animation: blink 0.8s step-end infinite; }
 
     /* Dissolve particles */
     .dp { fill: #8a8a8a; }
@@ -255,8 +256,10 @@
   <text class="twText tw2" x="57" y="293" style="font-size:14px;fill:#606060">Kill the roadmap.</text>
   <text class="twText tw3" x="57" y="338" style="font-size:14px;fill:#606060">Humans write intent.</text>
 
-  <!-- Typewriter cursor -->
-  <rect class="twCursor" x="57" y="216" width="9" height="17" rx="1"/>
+  <!-- Typewriter cursor (g=position, rect=blink) -->
+  <g class="twCursorWrap">
+    <rect class="twCursorRect" x="57" y="216" width="9" height="17" rx="1"/>
+  </g>
 
   <!-- Dissolve particles for insight 1 -->
   <g>
@@ -289,7 +292,7 @@
   <!-- ========== RIGHT: SIGNATURE D1 MONOGRAM ========== -->
   <!-- Luxury calligraphic "D1" — sweeping italic strokes with flourish -->
   <g transform="translate(620, 60) scale(3.8)">
-    <path class="sig" d="
+    <path class="sig" fill-rule="evenodd" d="
       M 8,108
       C 8,108 6,95 8,75
       C 10,55 14,30 20,18
@@ -307,7 +310,9 @@
       C 46,110 34,106 28,96
       C 22,86 22,68 26,52
       C 28,42 30,34 30,30
-
+      Z
+    "/>
+    <path class="sig" d="
       M 120,6
       C 118,4 116,2 120,2
       L 130,2
