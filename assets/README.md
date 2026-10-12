@@ -1,5 +1,13 @@
 # 资料索引
 
+## 基于 Harness 开发完整 Agent 产品
+
+从通用 Harness API 出发，组织产品行为、执行架构、双端接入、恢复与安全，以及模块开发顺序和验收。
+
+**[阅读软件开发指南](harness-product-development/README.md)**
+
+[完整指南](harness-product-development/guide.md) · [API 契约参考](harness-product-development/api-contract.md) · [开发路线与验收矩阵](harness-product-development/roadmap.md) · [技术依据](harness-product-development/references.md)
+
 ## 低噪声 Agent 产品开发
 
 围绕 AI 辅助开发中的系统理解、需求表达和可验证交付，整理为两篇主文与两份实践资料。
