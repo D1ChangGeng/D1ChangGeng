@@ -1,5 +1,13 @@
 # 资料索引
 
+## Insurance Agent 每周实践分享
+
+围绕保险顾问 Agent 的运行时链路、工具能力、业务集成与工程验收，按每周实践分享日期持续归档 Markdown 汇报稿和工程证据收集指令。
+
+**[查看每周分享归档](insurance-agent-weekly/README.md)**
+
+[2026-10-14：从保险业务 Agent 到可验证的 Harness Runtime](insurance-agent-weekly/2026-10-14/weekly-sharing.md) · [Codex 证据收集指令](insurance-agent-weekly/2026-10-14/codex-evidence-request.md)
+
 ## 基于 Harness 开发完整 Agent 产品
 
 从通用 Harness API 出发，组织产品行为、执行架构、双端接入、恢复与安全，以及模块开发顺序和验收。
