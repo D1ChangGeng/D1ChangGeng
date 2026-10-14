@@ -1,175 +1,547 @@
 # 把 Harness 交付出去：部署生命周期、数据库恢复与版本证据
 
-代码在开发机器上通过了工具循环测试，服务也能返回完整事件。几天后换一台机器启动，旧会话还能读取吗？升级 SDK 后，之前的检查点仍然可以恢复吗？数据库迁移成功，是否意味着历史引用和来源授权也保持一致？
+## 01｜代码能运行以后，交付还包含什么？
 
-这些问题决定一个 Harness（智能体执行控制系统）能否从开发成果变成可维护服务。交付不仅包含源码，还包含运行版本、配置关系、数据迁移和恢复方法。
+> 开发机器上的条款查询已经通过测试。现在需要让另一位维护者启动同一套服务，并在升级后继续读取已有对话。
 
-本文以 Insurance Agent Runtime 的本地部署和既有生命周期验证为例，说明如何把这些关系组织成可复核的工程交付。示例命令面向已有授权的隔离实例；不包含生产地址、凭证或业务原文。
+交付对象不只有源码。维护者还需要运行环境、依赖版本、数据库结构、配置入口和恢复方法。
 
-## 发布的是一个版本组合
-
-一个 Agent 服务的行为由多种版本共同决定：产品源码、依赖锁、模型配置、工具规格、后端实现、数据库结构、提示指令和数据来源。
-
-因此，“发布了某个 Git commit”只确定其中一部分。还需要把实际运行镜像和配置连接到源码，并说明外部资源采用什么版本。
+一个 Agent Harness（智能体执行控制系统）的实际行为由多种身份共同决定：模型、工具、业务数据、权限、程序版本和运行状态。仅记录一个 Git commit，无法说明完整部署采用了什么配置。
 
 ```text
 源码提交与依赖锁
-  → 构建出的镜像
-  → 服务端运行配置
-  → 数据库结构与迁移记录
-  → 模型和工具集合快照
-  → 实际业务资源与验证记录
+  → 镜像构建输入
+  → 镜像内容身份
+  → 实例配置与授权
+  → 数据库结构和持久数据
+  → 模型、工具与业务资源
+  → 运行结果和验证证据
 ```
 
-其中有些内容需要保持私有，例如凭证和受限数据。公开交付可以保存配置模板、字段说明和版本身份；实际值由部署环境注入。
+每一层都需要与前后层建立可核对关系。发生问题时，才能确定应该回滚代码、恢复数据、修正配置，还是重新验证外部服务。
 
-本工程在 `package.json` 中锁定 Node 主版本范围、包管理器和关键 SDK 依赖。本文涉及的源码快照使用 Agents SDK 0.18.0。升级时应重新验证集成行为，而不是只修改依赖数字。[^package]
+## 02｜一个本地 Runtime 部署长什么样？
 
-## 从干净源码开始构建
+当前工程提供本地 Docker 部署：一个 Node.js Runtime 容器，一个专属 PostgreSQL 容器，以及独立配置目录和数据库卷。Runtime 内包含 HTTP、Worker、SDK Runner 和工具注册。
 
-构建来源应明确包含哪些字节。一个工作树即使 HEAD 相同，也可能存在尚未提交的修改。如果发布记录只保存 commit，却实际把本地修改一起打包，后续很难复现。
+```mermaid
+flowchart TD
+  USER["本地调用方"] --> HTTP["Loopback HTTP / SSE"]
+  subgraph HOST["Linux / WSL 主机"]
+    HTTP --> RT["Runtime容器：Node.js"]
+    RT --> PG["专属PostgreSQL容器"]
+    PG --> VOL["pg_data持久卷"]
+    CFG["私有配置与凭证目录"] --> RT
+    CFG --> PG
+  end
+  RT -. "按授权配置接入" .-> EXT["模型与业务资源"]
+```
 
-工程运维说明采用从指定提交导出干净构建目录的方式。它把源码身份与构建输入连接起来，再将源码提交写入镜像构建参数。[^ops]
+Loopback（本机回环地址）限制服务只在本机监听。当前 Runtime 要求回环监听，Compose 因此使用 Linux host network（共享宿主网络），数据库端口则绑定到宿主回环地址。[^ops]
+
+Host network 与普通容器端口映射不同。该模式共享宿主网络命名空间，不再依靠 Runtime 的 `ports` 映射隔离流量。防护重点包括实际监听地址、主机访问规则和受控配置。[^docker]
+
+历史生命周期验证在 Linux/WSL 环境进行。其他平台即使支持类似网络模式，也需要验证实际路径、文件权限和启动行为，不能仅凭同一份 YAML 推断完全一致。
+
+## 03｜怎样把镜像绑定到准确的源码？
+
+Git commit 标识提交，Git tree 标识该提交的文件树。Working Tree（工作树）还可能包含未提交修改。相同 HEAD 不代表两个工作目录拥有相同字节。
+
+一种清晰的构建方法是使用 `git archive` 导出指定提交：
 
 ```bash
-# 在已确认的产品源码目录中执行，示意隔离构建输入。
-releaseCommit=$(git rev-parse HEAD)
-buildDirectory=$(mktemp -d)
-git archive "$releaseCommit" | tar -x -C "$buildDirectory"
+set -euo pipefail
 
-image="insurance-agent-runtime:$(git rev-parse --short=12 HEAD)"
+releaseCommit="$(git rev-parse --verify HEAD)"
+shortCommit="$(git rev-parse --short=12 "$releaseCommit")"
+buildDirectory="$(mktemp -d)"
+git archive "$releaseCommit" | tar -x -C "$buildDirectory"
+image="insurance-agent-runtime:$shortCommit"
+
 docker build \
   --build-arg SOURCE_COMMIT="$releaseCommit" \
   --tag "$image" \
   "$buildDirectory"
 ```
 
-这段命令构建已经提交的内容；本地未提交的修改不会进入归档。实际部署还要核对 Dockerfile、依赖获取和目标平台，构建目录的保留与清理由操作者自己的工作区策略管理。
+这个命令构建已提交的内容。工作树中的临时修改不会自动进入归档。需要发布修改时，应先完成对应提交与验证。
 
-镜像里的源码标签是一个声明，还需要实际镜像 ID 或 digest（内容身份摘要）及构建记录支持。标签可以移动，内容摘要则更适合识别某次具体产物。
-
-## 配置值与配置身份分别保存
-
-RunSnapshot（运行快照）描述某次执行采用的模型、工具和策略。部署配置负责建立客户端、服务地址和本地资源。配置摘要用于比较身份，凭证值仍由私有引用提供。
-
-典型启动入口如下：
+Dockerfile 将 `SOURCE_COMMIT` 写入镜像 revision label（修订标签）。构建后还应读回实际镜像身份：
 
 ```bash
-corepack pnpm install --frozen-lockfile
+docker image inspect "$image" \
+  --format '{{.Id}} {{index .Config.Labels "org.opencontainers.image.revision"}}'
+```
+
+镜像 Tag（标签）是可移动的名称。Image ID（本地镜像内容身份）与 Registry Digest（镜像仓库内容摘要）用于识别具体产物。把提交号写入标签名字，并不能阻止标签以后指向其他镜像。
+
+当前运维 helper 使用已验证的镜像名称，并核对最终 Compose 中实际采用的 image。发布记录应另外保存构建结果与读回身份。
+
+## 04｜Dockerfile 怎样固定运行环境和依赖？
+
+本工程 Dockerfile 固定 Node 基础镜像的标签与摘要，并在构建时检查 Node 和 pnpm 版本。项目依赖通过 frozen lockfile（冻结依赖锁）安装。[^image]
+
+关键步骤如下：
+
+```dockerfile
+# 摘编，NODE_IMAGE 在原文件中绑定具体标签与sha256摘要。
+FROM ${NODE_IMAGE} AS build
+WORKDIR /opt/insurance
+RUN npm install --global pnpm@12.8.1 --ignore-scripts --no-audit --no-fund \
+ && test "$(node --version)" = "v24.18.1" \
+ && test "$(pnpm --version)" = "12.8.1"
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# 原文件随后复制各workspace的package.json。
+RUN pnpm install --frozen-lockfile --child-concurrency=1 --network-concurrency=4
+```
+
+依赖安装完成后，构建阶段复制应用、契约和运维入口，再构建并核对产品静态资源。运行阶段复制允许的产物，使用非 root 用户启动 Node。
+
+```dockerfile
+FROM ${NODE_IMAGE} AS runtime
+ARG SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.revision="${SOURCE_COMMIT}"
+WORKDIR /opt/insurance
+COPY --from=build --chown=node:node /opt/insurance /opt/insurance
+USER node
+ENV NODE_ENV=production
+CMD ["node", "tools/ops/start-runtime.mjs"]
+```
+
+这是多阶段构建的实际结构摘编。当前运行镜像保留完整锁定依赖树，不能仅因存在 runtime 阶段就宣称已裁剪所有开发依赖。
+
+构建检查也有自己的范围。静态资源构建成功不代表真实模型调用已通过；依赖安装成功也不代表数据库迁移和旧会话恢复已验证。每种证据需要分别记录。
+
+## 05｜为什么构建上下文需要明确范围？
+
+Build Context（构建上下文）是构建器可以访问的文件集合。直接将整个开发目录传给 Docker，可能把私有配置、日志、备份或缓存一起纳入构建输入。[^context]
+
+工程的构建说明采用允许列表，限定应用、契约、依赖清单和运维代码。`.git`、本地私有目录、token、key 和 dump 不属于运行镜像需要的源码。
+
+```text
+允许进入构建
+  package.json / lockfile / workspace定义
+  apps/ 与 packages/ 中的产品代码
+  tools/ops/ 的启动和运维入口
+
+独立保存
+  私有凭证与授权回执
+  本地数据库配置
+  业务导出、备份与执行日志
+```
+
+`git archive` 能固定已提交内容，但如果秘密已经被提交，它仍然会进入归档。源码审查、私有文件隔离和构建上下文检查需要同时存在。
+
+还应检查 Dockerfile 的 COPY 范围。一个宽泛 COPY 即使目前没有复制秘密，未来新增目录时也可能改变镜像内容。允许列表使这种变化更容易被识别。
+
+## 06｜实例 Manifest 与私有配置是什么？
+
+Manifest（实例清单）描述一套本地部署的身份。它记录 Compose project、数据库名称、当前活动数据库、镜像、端口、目录和运行用户。
+
+```json
+{
+  "schemaVersion": "insurance-local-ops/1",
+  "project": "insurance-d-m19-0123456789ab",
+  "database": "insurance_d_m19_0123456789ab",
+  "activeDatabase": "insurance_d_m19_0123456789ab",
+  "httpPort": 18497,
+  "dbPort": 55479,
+  "image": "insurance-agent-runtime:example",
+  "uid": 1000,
+  "gid": 1000,
+  "mode": "synthetic"
+}
+```
+
+这是字段摘录，ID 与镜像名为合成值。实际 Manifest 还包含目录、私有目录、主体与时间等字段。
+
+`configure()` 为新实例生成随机身份、数据库密码、测试令牌和游标签名密钥。目录权限为0700，配置文件为0600。实例目录必须尚不存在，以免覆盖已有配置。[^helper]
+
+Runtime 接收的是配置路径。PostgreSQL 使用密码文件，真实秘密不应进入镜像构建参数、URL、命令行输出或公开文档。
+
+`database` 保存初始数据库身份。`activeDatabase` 保存当前实际使用的数据库。恢复到新库后，两者可能不同，后续备份必须使用活动库。
+
+## 07｜环境变量怎样避免覆盖实例身份？
+
+Compose 会处理环境变量和配置插值。若运维命令直接继承任意 `COMPOSE_*` 或实例变量，操作者环境可能改变目标项目、镜像或挂载目录。
+
+当前 helper 以已验证 Manifest 为权威来源。它清理外部的 `INSURANCE_OPS_*` 和 `COMPOSE_*` 变量，再注入由 Manifest 派生的环境。Compose 命令显式指定 project、文件、目录和空 env file。
+
+```ts
+// tools/ops/local.mjs：环境构造的核心形状。
+const inherited = Object.fromEntries(
+  Object.entries(process.env).filter(([name]) =>
+    !name.startsWith("INSURANCE_OPS_") &&
+    !name.startsWith("COMPOSE_") &&
+    name !== "NODE_EXTRA_CA_CERTS" &&
+    name !== "INSURANCE_RUNTIME_CA_REFERENCE"
+  )
+);
+return {
+  ...inherited,
+  ...manifestVariables(manifest),
+  COMPOSE_DISABLE_ENV_FILE: "1",
+};
+```
+
+随后执行 `docker compose config --format json`，检查渲染后的服务、镜像、用户、挂载、网络与资源限制。渲染结果偏离 Manifest 时，效果命令被拒绝。
+
+这使 `ops.env` 成为非秘密元数据记录，而不是可以随意覆盖目标实例的最终权威。维护者应使用当前受控管理入口修改实例配置，不能沿用旧说明只改一份环境文件。
+
+`readManifest(directory)` 还先检查 Manifest 中的 directory 等于调用方选择的目录。把另一个实例的完整 Manifest 复制过来，不应静默让 stop 或 down 操作转向另一套服务。
+
+<details>
+<summary><strong>展开：实例身份为什么需要在产生效果前再次检查？</strong></summary>
+
+读取配置后，环境或文件仍可能变化。helper 在执行普通命令和流式备份恢复前，都使用同一派生环境渲染并核对 Compose。
+
+这不是为了多生成一份说明，而是为了让“将要操作的实例”与“调用方选择的实例”保持一致。
+
+</details>
+
+## 08｜怎样从干净源码启动一套隔离实例？
+
+先准备已获授权的 Linux/WSL Docker 环境与非 root 账户。运维 helper 不负责启动或重配 Docker daemon（后台服务）。
+
+构建前节所述镜像后，在新的独立目录初始化实例：
+
+```bash
+set -euo pipefail
+: "${image:?请先构建并核对Runtime镜像}"
+: "${HTTP_PORT:?请选择空闲的本地HTTP端口}"
+: "${DB_PORT:?请选择空闲的本地数据库端口}"
+
+stateParent="$HOME/harness-local"
+mkdir -p "$stateParent"
+instanceId="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(6).toString("hex"))')"
+opsDirectory="$stateParent/instance-$instanceId"
+
+node tools/ops/local.mjs init \
+  --directory "$opsDirectory" \
+  --image "$image" \
+  --http-port "$HTTP_PORT" \
+  --db-port "$DB_PORT"
+
+node tools/ops/local.mjs up --directory "$opsDirectory"
+```
+
+命令使用实际项目入口。`HTTP_PORT` 与 `DB_PORT` 需要选择未被其他服务占用的合法值。新实例目录由 helper 创建，不能提前创建成一个已有实例。
+
+默认初始化生成 synthetic（合成）运行配置。它适合验证本地控制面、队列、SDK 和持久结果。真实模型与真实业务资源需要各自的授权配置和核验。
+
+本例只说明操作步骤。实际执行会创建容器、数据库和私有文件，应在指定的隔离环境进行。
+
+## 09｜Readiness 与能力目录分别证明什么？
+
+Readiness（就绪状态）表示服务满足一组已定义条件。例如数据库可连接、队列可使用。它不自动证明所有真实业务接口已完成核验。
+
+```bash
+curl --fail-with-body --silent --show-error \
+  "http://127.0.0.1:$HTTP_PORT/health/ready"
+```
+
+读取工具目录还需要当前授权。目录可以展示能力、数据模式和 ready/pending 状态。它说明当前开放的动作空间，不等于这些动作已经在本次启动后执行。
+
+完整启动核对应包括三个层次：
+
+| 层次 | 核对对象 |
+| --- | --- |
+| 基础就绪 | HTTP、数据库、队列与配置 |
+| 能力状态 | 工具描述、模型配置、支持的恢复模式 |
+| 实际运行 | 提交一个受控任务并读回最终内容与事件 |
+
+默认合成模型可能直接返回固定文本，工具数为0。它验证基本生命周期。要验证工具循环，使用第十二篇的受控 TestRig 或已授权模型。
+
+真实资源状态还应绑定验证时间与版本。一次健康检查通过，不能无限期替代外部接口读回。
+
+## 10｜运行数据到底保存在哪里？
+
+部署需要区分临时状态与持久状态。
+
+```text
+Runtime 内存
+  当前Promise、取消信号、客户端对象、执行缓存
+
+PostgreSQL volume
+  Thread / Turn / Run
+  ModelStep / ToolInvocation / Canonical Item
+  Event / Checkpoint / Job / SourceReference
+
+私有配置目录
+  数据库连接引用、令牌、游标签名密钥、授权配置
+
+外部系统
+  模型服务、原始文档、检索索引和业务数据库
+```
+
+删除 Runtime 容器并不等于删除 PostgreSQL volume。相反，如果卷被移除，即使镜像还存在，也无法恢复原来的运行记录。
+
+本项目的 `down` 停止并移除当前实例容器与网络，保留数据库卷。`stop` 只停止 Runtime，便于数据库继续运行以备份或恢复。实际数据清理属于单独的授权操作。
+
+Session（模型历史视图）的 clear 操作也不等于删除持久历史。它改变当前引用视图，而原始内容、工具结果与审计事实仍在数据库中。
+
+这些区别应写进维护流程。否则，维护者可能用重启容器处理数据问题，或者在需要保留历史时误删卷。
+
+## 11｜为什么停机顺序是执行器在前、存储在后？
+
+Graceful Shutdown（有序关闭）让系统停止接收新工作，并尽量提交当前运行的结束状态。
+
+`composeRuntime()` 的释放函数先停止 Worker，再停止维护任务，最后关闭 Storage。HTTP/SSE 也清理自己的观察连接。[^runtime]
+
+```text
+停止新接入与观察
+  → 通知当前Run停止
+  → 等待Worker和监督任务收尾
+  → 停止维护任务
+  → 关闭数据库连接
+```
+
+Worker 需要在数据库仍然可用时保存 cancelled 或 interrupted。若先关闭存储，再让执行器写终态，就会主动制造未确认结果。
+
+取消是协作式的。外部服务可能已经执行某个动作，但本地尚未收到返回。正常停机流程应按持久事实收尾，而不是假定所有远端请求都已撤销。
+
+异常进程退出则可能完全没有执行 finally。重启后的租约监督负责识别失去执行者的 Run。已提交结果保留，未完成动作按实际状态进入恢复判断。
+
+## 12｜数据库迁移怎样验证历史语义？
+
+Migration（数据库迁移）改变结构或存储规则。SQL 执行成功只是第一项检查。Harness 还需要确认旧引用、状态与恢复数据仍可解释。
+
+项目使用 Drizzle 迁移 SQL 和 journal（迁移记录）。迁移命令使用数据库锁管理执行，已经应用的迁移不应在重复启动时再次创建同样结构。
+
+已有生命周期记录曾验证迁移数量从4变为5，再次执行仍为5。验证还读取原 Thread、工具结果、最终内容和来源身份，确认它们在对应版本中保持一致。该结果属于历史执行，不是本轮新运行。[^history]
+
+```text
+迁移前：Turn U1 → finalContentRef A1 → 已提交答案
+迁移后：Turn U1 → 同一A1 → 同一答案与来源关系
+```
+
+升级检查应覆盖当前业务关心的语义：已完成 Turn 的最终引用有效，工具结果能读取，来源版本没有被静默替换，活动运行和检查点有明确处理规则。
+
+应用镜像与数据库结构也需要兼容。如果旧程序无法读取新字段或状态，简单切换镜像可能无法完成回滚。
+
+## 13｜一份数据库备份包含什么？
+
+Backup（备份）保存可恢复的数据副本。当前 helper 使用 PostgreSQL 的 custom 格式 dump，后续由 pg_restore 恢复。[^postgres]
+
+数据库备份可以包含运行历史、事件、检查点、队列任务与持久来源目录。它不自动包含外部模型状态、对象存储原文、操作系统文件凭证或 PostgreSQL 集群角色。
+
+因此，完整恢复需要分别管理：
+
+| 对象 | 需要保留什么 |
+| --- | --- |
+| 数据库 | 备份内容、摘要、创建时间、版本 |
+| 镜像 | 已核对的内容身份与源码关系 |
+| 私有配置 | 主体映射、模型与工具配置、密钥引用 |
+| 外部资料 | 文档版本、索引和实际资源可用性 |
+| 权限环境 | 数据库角色、当前业务授权与访问范围 |
+
+源码的 helper 额外要求 Runtime 已停止，并拒绝覆盖已有 dump 文件。它输出文件路径、诊断字节数和 SHA-256 摘要，原始数据库内容留在私有文件中。
+
+这比 PostgreSQL 工具自身的在线一致性快照要求更严格，是本地产品的运维策略。不要将“helper 要求停机”解释为 pg_dump 本身只能备份停机数据库。
+
+旧备份可能包含后来删除或归档的数据。恢复前需要确认数据保留范围和授权，避免让历史备份重新暴露不应开放的资料。
+
+## 14｜怎样在新数据库验证恢复？
+
+恢复操作先创建独立新库，再导入备份。这样可以在原库保持不变的情况下核对结果。
+
+```bash
+node tools/ops/local.mjs stop --directory "$opsDirectory"
+
+node tools/ops/local.mjs backup \
+  --directory "$opsDirectory" \
+  --file "$opsDirectory/snapshot.dump"
+
+restoreDatabase="insurance_d_m19_restore_$(node -e \
+  'process.stdout.write(require("node:crypto").randomBytes(6).toString("hex"))')"
+
+node tools/ops/local.mjs restore \
+  --directory "$opsDirectory" \
+  --file "$opsDirectory/snapshot.dump" \
+  --database "$restoreDatabase"
+```
+
+这是现有 helper 的命令形状。恢复库名称受到固定前缀与随机身份格式限制。已存在的目标库会使创建失败，helper 不会自动清空原库。
+
+导入失败也不会自动激活新库。部分恢复结果和诊断保留在受控位置，便于分析。
+
+恢复后需要只读核对重要身份：
+
+```sql
+SELECT id, thread_id, status, final_content_ref
+FROM runtime.turns ORDER BY thread_id, ordinal;
+
+SELECT id, run_id, model_step_id, status, result_item_ref
+FROM runtime.tool_invocations ORDER BY started_at, id;
+
+SELECT thread_id, min(seq), max(seq), count(*)
+FROM runtime.events GROUP BY thread_id;
+```
+
+这些查询面向授权恢复环境。正式验证还应使用公开 API 核对主体隔离、最终内容与来源，而不是只比较数据库行数。
+
+新库通过检查后，才进入活动库切换：
+
+```bash
+node tools/ops/local.mjs activate \
+  --directory "$opsDirectory" \
+  --database "$restoreDatabase"
+node tools/ops/local.mjs up --directory "$opsDirectory"
+```
+
+启动后再次读回。数据库导入成功与产品在新库上正常工作，是两个完成条件。
+
+## 15｜活动数据库切换为什么不只是改一个字符串？
+
+同一实例可能有容器内数据库配置、宿主维护配置和 Manifest。它们都需要指向相同活动数据库。
+
+`activateDatabase()` 要求 Runtime 已停止，并先确认目标库可以连接。随后分别更新两份数据库配置和 Manifest 的 activeDatabase。
+
+```text
+database.json          → 新数据库
+ database-host.json    → 新数据库
+manifest.activeDatabase→ 新数据库
+```
+
+每个文件通过同目录 `.next` 文件和 rename（重命名替换）更新。单个文件替换可以有清晰边界，但多个文件整体并不是一个数据库事务。
+
+若进程在两次替换之间中断，配置可能暂时不一致。`readManifest()` 会核对各文件与 activeDatabase，发现不一致时拒绝继续产生效果。
+
+恢复这类状态时，应保持 Runtime 停止，依据已保留的配置和实际目标库恢复一致关系。不能通过跳过校验强行启动。
+
+后续备份使用 activeDatabase，而不是始终备份最初创建的 database。否则切换后新增的运行记录可能完全没有进入备份。
+
+## 16｜镜像回滚、数据库恢复和 Run Resume 有什么区别？
+
+Rollback（镜像回滚）切换应用程序版本。数据库恢复切换持久数据状态。Run Resume（运行恢复）则使用某个检查点创建新的执行尝试。
+
+三种操作各有前提：
+
+| 操作 | 必须核对 |
+| --- | --- |
+| 镜像回滚 | 旧程序是否能读当前Schema与配置 |
+| 数据库恢复 | 备份完整性、主体与外部资源版本 |
+| Run Resume | 检查点、SDK、模型、工具与当前授权 |
+
+一个服务能启动，不代表它能继续所有旧检查点。SDK 序列化版本或工具 Schema 改变后，恢复接口仍可能按规则拒绝。
+
+历史运维验证曾在明确兼容的两份镜像之间切换，并确认内容与来源读取保持一致。这个证据只覆盖当时的组合，不能扩展为未来任意版本都支持降级。
+
+升级前应明确回退策略。如果数据库迁移不兼容旧程序，回滚可能需要对应的旧镜像、配置与升级前数据备份，而不是只改一个镜像标签。
+
+## 17｜怎样验证实例隔离和资源限制？
+
+当前 helper 对最终 Compose 配置核对多项边界：Runtime 非 root、根文件系统只读、私有目录只读挂载、移除 Linux capabilities（进程特权能力），并启用 no-new-privileges（禁止获得新的进程特权）。
+
+它还检查 CPU、内存与进程数量限制。具体值来自实例模板和源码校验，部署后应通过真实容器配置读回。
+
+```text
+配置声明
+  → docker compose config 渲染
+  → helper逐项核对
+  → 容器实际启动
+  → image / user / mounts / network / limits读回
+```
+
+配置测试可以在不启动容器时验证环境覆盖和挂载偏差。真实生命周期测试再检查实际容器采用了相同条件。
+
+共享宿主网络仍意味着网络隔离有限。非 root 和只读文件系统也不是对所有外部行为的完整沙箱。模型与业务资源继续由工具权限、受控客户端和部署出口策略约束。
+
+<details>
+<summary><strong>展开：隔离测试为什么要观察无关服务？</strong></summary>
+
+本地机器可能同时运行其他数据库、开发服务和协作工具。一个运维测试应该只操作自己创建的 Compose project。
+
+工程生命周期记录会比较相关共享服务的身份和启动状态，确认测试前后未被改变。独立端口、随机项目名和目录身份校验共同降低误操作风险。
+
+</details>
+
+## 18｜发布记录怎样连接源码、测试、镜像和数据？
+
+Release Evidence（发布证据）不是把所有日志放在一个目录就完成。它需要明确每项结果绑定哪个产物。
+
+| 证据 | 需要绑定的身份 |
+| --- | --- |
+| 源码检查 | commit、tree、工作树修改 |
+| 自动测试 | 代码版本、依赖锁、实际执行与跳过项 |
+| 镜像构建 | 构建来源、镜像ID或仓库digest |
+| 容器核验 | 实际镜像、用户、挂载、网络与资源 |
+| 数据迁移 | 迁移记录、旧数据读回、重复执行 |
+| 备份恢复 | dump摘要、目标库、恢复后API核对 |
+| 真实业务能力 | 当前授权、接口、数据版本和验证时间 |
+
+如果测试在旧 commit 上完成，之后只修改文档，可以保留原测试身份并说明变更范围。不能把旧数字改成当前 HEAD 的“新执行结果”。
+
+### 用稳定事实比较恢复前后结果
+
+下面的 Python 示例从两份合成导出中提取稳定字段。它忽略导出时间，但比较内容、最终引用和工具结果身份。
+
+```python
+from copy import deepcopy
+
+
+def stable_facts(exported):
+    return {
+        "threadId": exported["thread"]["threadId"],
+        "turns": sorted((x["turnId"], x["status"], x["finalContentRef"])
+                        for x in exported["turns"]),
+        "items": sorted((x["itemId"], x["status"], x["text"])
+                        for x in exported["items"]),
+        "tools": sorted((x["invocationId"], x["status"], x["resultItemRef"])
+                        for x in exported["toolInvocations"]),
+    }
+
+
+before = {
+    "thread": {"threadId": "T1"},
+    "turns": [{"turnId": "U1", "status": "completed", "finalContentRef": "A1"}],
+    "items": [{"itemId": "A1", "status": "committed", "text": "合成答案"}],
+    "toolInvocations": [{"invocationId": "V1", "status": "succeeded", "resultItemRef": "E1"}],
+    "exportedAt": "2026-10-01T00:00:00Z",
+}
+after = deepcopy(before)
+after["exportedAt"] = "2026-10-02T00:00:00Z"
+assert stable_facts(before) == stable_facts(after)
+broken = deepcopy(after)
+broken["turns"][0]["finalContentRef"] = "A2"
+assert stable_facts(before) != stable_facts(broken)
+print("导出时间可以变化，稳定内容与引用必须保持一致")
+```
+
+这只是恢复核对的一部分。完整产品还要核对来源、授权、Run用量、检查点和事件。选择比较字段时，应明确哪些信息允许变化，哪些身份必须保持。
+
+## 19｜怎样运行运维测试并判断交付完成？
+
+配置测试检查 Manifest、目录、环境和 Compose 渲染，可先运行：
+
+```bash
 corepack pnpm typecheck
+corepack pnpm exec vitest run tests/ops/config.test.ts
 corepack pnpm check:contracts
 corepack pnpm check:control
-
-INSURANCE_DATABASE_CONFIG=/absolute/private/database.json \
-  corepack pnpm db:migrate
-
-INSURANCE_DATABASE_CONFIG=/absolute/private/database.json \
-INSURANCE_HTTP_CONFIG=/absolute/private/http.json \
-  corepack pnpm runtime:start
 ```
 
-命令来自项目脚本；配置文件应按仓库模板和已批准资源填写。这个例子展示的是启动关系，不代表公开文章附带了一套可直接访问真实业务的配置。[^package]
+真实生命周期脚本使用新初始化、尚未迁移或运行的专属实例：
 
-业务地址、模型账号和授权变化可能改变绑定身份。某个凭证完成轮换，也不应该让旧 Run 在没有兼容判断的情况下改用另一种业务口径。
-
-## 健康检查要说明检查到哪一层
-
-Liveness（进程存活）说明服务进程能够响应。Readiness（依赖就绪）说明当前组件满足某组启动条件。真实业务可用性还需要实际模型和业务接口的准入证据。
-
-一个合成模式实例可以具备可用数据库、队列、工具目录和模型执行路径，同时真实业务资源尚未接入。它的健康状态可以正常，因为它正在按声明模式工作。
-
-相反，某个真实接口可连接，也不代表所有业务操作都已验证。目录分页、来源映射和有效期规则需要独立检查。
-
-因此，产品应提供 Runtime Capabilities（运行能力查询）和工具状态，明确取消、重试、恢复模式与各类工具当前可用程度。调用方据此选择行为，比只读取一个 `ok: true` 更可靠。
-
-## 数据库迁移要验证历史语义
-
-Migration（数据库迁移）改变表结构或存储规则。迁移命令退出成功，只说明 SQL 按预期执行；Harness 还需要验证旧执行事实在新版本中如何解释。
-
-例如，历史 Turn 的 `finalContentRef` 仍然指向同一助手内容，ToolInvocation（工具执行实例）的结果引用仍可解析，来源引用保持同一文档版本，租约与检查点读取规则仍然有效。
-
-工程通过 Drizzle 的迁移记录与 PostgreSQL 锁管理迁移过程。既有生命周期证据曾验证从四次迁移推进到五次，再次运行保持五次，同时保留原有线程、最终内容和来源引用。这个案例说明了应检查哪些不变量，而不是保证所有未来迁移天然兼容。[^lifecycle]
-
-```text
-迁移前
-  Thread T → finalContentRef A → 已提交内容
-
-迁移后
-  Thread T → 同一个 A → 相同内容
-  工具摘要、来源引用、归属与版本继续可读
+```bash
+node tests/ops/lifecycle.ts "$opsDirectory"
 ```
 
-升级后的最小读回应覆盖这些关系，再开放新的运行流量。
+这不是只读检查。脚本会操作指定实例的数据库和容器，执行迁移、任务、备份、恢复与重启。它应只在已授权的独立环境运行，不能指向已有生产实例。
 
-## 停机顺序影响状态能否完成收尾
+历史记录证明了某些具体版本下的迁移、恢复、最终内容、来源读取和留卷重启。每份记录保留自己的执行版本与范围。当前文章没有把这些历史结果变成本轮新的部署验证。
 
-运行中的模型、工具和观察连接各有自己的生命周期。关闭服务时，应停止新的接入，让观察连接退出，再由 Worker（后台执行器）和 RunnerFacade（运行门面）处理当前运行，最后关闭存储。
+维护者最终应该能够回答：当前实例是什么版本，哪些能力真实可用，数据保存在何处，怎样停止和备份，升级失败后恢复哪一组代码与数据，以及在哪里找到对应验证。
 
-实际 `composeRuntime()` 的释放顺序先停止 Worker，再停止维护任务，最后关闭数据库连接。HTTP 关闭钩子还会清理 SSE（服务器发送事件）订阅。[^composition]
-
-这样，执行器在数据库仍可用时有机会提交中断状态和检查点。如果进程未能完成正常收尾，下一次启动由租约监督识别过期执行，再按持久规则收敛。
-
-Graceful Shutdown（有序关闭）与异常进程退出需要分别验证。前者检查正常释放顺序，后者检查已经提交数据能否保留、旧租约是否失效，以及可恢复边界能否被发现。
-
-## 数据备份必须伴随恢复验证
-
-一份成功生成的 dump（数据库备份文件）仍然需要通过恢复证明其可用。尤其是 Agent 服务，关心的不只是表数量，还有历史关系和访问规则。
-
-本工程的运维流程要求先停止 Runtime，备份活动数据库，再恢复到独立的新数据库。恢复成功后读取 Thread 导出、最终内容和来源引用，比较是否一致，并检查跨主体访问规则。[^ops][^lifecycle]
-
-```text
-受控实例停止接收新执行
-  → 备份当前活动数据库
-  → 恢复到新的隔离数据库
-  → 核对导出、内容、来源和归属
-  → 明确切换活动数据库
-  → 启动并再次读回
-```
-
-新库恢复让验证有自己的目标，也避免在尚未确认备份有效时直接覆盖当前数据库。PostgreSQL 的 custom 格式备份和 `pg_restore` 提供相应工具能力；产品运维脚本在此基础上增加实例和状态检查。[^pg]
-
-实际 helper 的多文件活动库切换并不是单个数据库事务。它更新配置和清单时使用文件替换，并在后续启动检查一致性。若操作中断，应先恢复一致配置再继续。把每个文件都原子写入，并不等于多个文件整体已经原子切换。
-
-## 回滚需要兼容性依据
-
-Rollback（回滚）常被理解为换回旧镜像。对于包含数据库和持久 SDK 状态的 Harness，还需要判断旧代码能否读取当前结构、配置和检查点。
-
-如果迁移保持向后兼容，切回已验证镜像可能足够。如果旧版本无法理解新状态，就需要使用升级前的数据库备份、对应配置和镜像组合恢复。
-
-检查点还有自己的 SDK、模型和工具集约束。服务进程能够启动，并不说明旧检查点仍然可恢复；恢复接口应继续按其版本规则判断。
-
-因此，一次发布应保留明确的兼容矩阵：哪些数据库版本和镜像一起验证过，哪些历史可以读取，哪些检查点模式可继续，以及回滚时需要恢复哪些资源。已经完成的单次镜像生命周期验证，不应扩展成对任意历史镜像的兼容保证。
-
-## 运行证据应绑定实际执行产物
-
-项目中同时可能存在最新源码、此前完成回归的源码、已经构建的镜像和正在运行的实例。它们可以合理不同，但报告必须分别绑定。
-
-例如，一次文档修订产生了新的 commit，实际数据库回归仍然运行于前一个代码版本。此时应保留原测试版本，并说明变更范围；不能把旧测试数字重新标成当前 HEAD 的新执行结果。
-
-交付核对可以按以下关系进行：
-
-| 证据 | 需要绑定 |
-| --- | --- |
-| 测试结果 | 执行源码、命令、环境和测试范围 |
-| 镜像验证 | 镜像摘要、源码身份、启动配置 |
-| 数据恢复 | 备份身份、目标数据库、恢复后读回 |
-| 真实业务能力 | 接口、授权范围、版本和验证时间 |
-| 模型效果 | 任务集、模型配置、原始轨迹和评分依据 |
-
-这些信息可以保存在受控工程资料中。对外技术文章只需引用必要的源码和验证范围，不必发布完整私有运行清单。
-
-## 交付文档最终服务于下一位操作者
-
-一个好的交付包让维护者可以回答：如何安装，如何启动，怎样识别当前版本，哪些能力真实可用，如何停止，怎样恢复数据，以及哪里能找到对应测试。
-
-它也应明确工程支持的部署环境。此案例的已记录容器验证在 Linux/WSL 环境中完成，网络和文件权限行为具有相应前提。其他平台需要自己的验证，不能直接从同一份 Compose 文件推断效果完全一致。
-
-当源码、版本、数据和操作过程形成可复核关系，Harness 才具备长期维护的基础。最后一篇将这些模块放回一条具体请求，完成从入口到事件的整体阅读：[端到端 Harness 实践](14-end-to-end-harness.md)。
+把这些问题落到配置、源码与实际读回，Harness 才能从开发程序进入可维护服务。最后一篇将所有模块重新放入一条具体请求：[从条款查询到持久事件的端到端实践](14-end-to-end-harness.md)。
 
 ## 实现依据
 
-[^package]: Insurance Agent Runtime 源码快照 `c66112dfd8676b47b143dc2e26739278cf4b0dde`：根目录 `package.json`、依赖锁和启动脚本。本文命令对应该工程，不代表已在读者环境执行。
-[^ops]: 同一快照中的 `docs/implementation/local-ops-preparation.md` 和 `tools/ops/local.mjs`。文中只引用已读取的流程说明，省略私有实例路径与数据。
-[^composition]: 同一快照：`apps/runtime/src/composition/runtime.ts`、`runner/worker.ts`、`transport/http/app.ts` 与 `sse.ts` 的关闭顺序。
-[^lifecycle]: `docs/implementation/evidence/d7-release-image-lifecycle.json` 保存的历史镜像生命周期验证绑定源码 `fb21fa47c9bc74d212c2f72423365b83466d32e9`。该记录覆盖其具体迁移、备份、新库恢复和留卷重启范围；不是本文新运行的部署结果。
-[^pg]: [PostgreSQL：pg_dump](https://www.postgresql.org/docs/16/app-pgdump.html) 与 [pg_restore](https://www.postgresql.org/docs/16/app-pgrestore.html)。工具能力与项目额外的实例状态约束分别说明。
+[^ops]: Insurance Agent Runtime 源码快照 `c66112dfd8676b47b143dc2e26739278cf4b0dde` 中的 `docs/implementation/local-ops-preparation.md`。不同历史验证条目保留各自的构建和执行版本。
+[^image]: 同一快照根目录 `Dockerfile` 与 `package.json`。Node、pnpm和依赖版本描述该源码的构建选择，不作为所有项目的通用推荐版本。
+[^helper]: 同一快照 `tools/ops/local.mjs` 中的 `configure`、`readManifest`、`composeEnvironment`、`inspectCompose`、`backup`、`restore` 和 `activateDatabase`。文中命令来自已读取的运维说明。
+[^runtime]: 同一快照 `apps/runtime/src/composition/runtime.ts`、`runner/worker.ts`、`transport/http/sse.ts`，分别管理组件、运行与观察连接生命周期。
+[^history]: `local-ops-preparation.md` 的历史镜像生命周期及2026-10-07读回说明。迁移4→5→5、新库恢复和留卷重启只支持对应记录的环境与版本。
+[^docker]: [Docker：Host network driver](https://docs.docker.com/engine/network/drivers/host/)，说明共享宿主网络与端口映射的关系。
+[^context]: [Docker：Build context](https://docs.docker.com/build/concepts/context/)，说明构建器可访问文件范围与dockerignore。
+[^postgres]: [PostgreSQL 16：pg_dump](https://www.postgresql.org/docs/16/app-pgdump.html) 与 [pg_restore](https://www.postgresql.org/docs/16/app-pgrestore.html)。数据库工具能力与本项目额外的停止、实例及权限检查分别说明。
