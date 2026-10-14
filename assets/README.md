@@ -1,12 +1,27 @@
 # 资料索引
 
-## Insurance Agent 每周实践分享
+## Harness 工程实践
 
-围绕保险顾问 Agent 的运行时链路、工具能力、业务集成与工程验收，按每周实践分享日期持续归档 Markdown 汇报稿和工程证据收集指令。
+从一次条款查询出发，沿真实 TypeScript 工程理解请求受理、任务调度、模型循环、工具系统、持久状态、恢复、事件协议与工程验证。14 篇文章按阅读顺序编号，包含源码分析、合成案例和代码示例。
 
-**[查看每周分享归档](insurance-agent-weekly/README.md)**
+**[从第一篇开始阅读](insurance-agent-weekly/01-from-rag-to-harness.md)** · [浏览全部文章](insurance-agent-weekly/)
 
-[2026-10-14：从保险业务 Agent 到可验证的 Harness Runtime](insurance-agent-weekly/2026-10-14/weekly-sharing.md) · [Codex 证据收集指令](insurance-agent-weekly/2026-10-14/codex-evidence-request.md)
+| 序号 | 文章 |
+| --- | --- |
+| 01 | [从一次条款查询开始：把模型循环放进可运行的 Harness](insurance-agent-weekly/01-from-rag-to-harness.md) |
+| 02 | [让 Agent 的行为可以被验证：契约、运行实体与证据标尺](insurance-agent-weekly/02-contracts-and-runtime-facts.md) |
+| 03 | [用户点击发送之后：请求受理、幂等与执行事务](insurance-agent-weekly/03-request-admission-and-transactions.md) |
+| 04 | [从排队任务到模型循环：Worker、执行租约与 RunnerFacade](insurance-agent-weekly/04-worker-and-model-loop.md) |
+| 05 | [为什么 Agent 能够继续查：会话历史、工具结果与上下文投影](insurance-agent-weekly/05-session-and-context.md) |
+| 06 | [让自主执行保持有界：预算、取消与检查点恢复](insurance-agent-weekly/06-budgets-cancellation-recovery.md) |
+| 07 | [一次工具调用如何成为可靠执行：ToolInvocation 的完整生命周期](insurance-agent-weekly/07-tool-invocation-lifecycle.md) |
+| 08 | [从检索片段到原始条款：证据身份、来源引用与多跳查询](insurance-agent-weekly/08-evidence-and-source-references.md) |
+| 09 | [让模型自己选工具：Tool Registry、能力版本与运行快照](insurance-agent-weekly/09-tool-registry-and-snapshots.md) |
+| 10 | [把工具接到真实业务系统：依赖装配、Port、Adapter 与数据模式](insurance-agent-weekly/10-composition-and-business-adapters.md) |
+| 11 | [Harness 最终输出什么：持久事件、内容引用与 SSE](insurance-agent-weekly/11-durable-events-and-streaming.md) |
+| 12 | [如何证明 Harness 工作正确：协议测试、故障注入与效果评测](insurance-agent-weekly/12-testing-and-evaluation.md) |
+| 13 | [把 Harness 交付出去：部署生命周期、数据库恢复与版本证据](insurance-agent-weekly/13-deployment-and-release.md) |
+| 14 | [一条请求穿过整个 Harness：从条款查询到持久事件](insurance-agent-weekly/14-end-to-end-harness.md) |
 
 ## 基于 Harness 开发完整 Agent 产品
 
