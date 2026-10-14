@@ -1,40 +1,19 @@
 # 从一次知识查询认识 Agent Harness：它是什么、长什么样、怎样运行？
 
-“查一下示例保障甲的等待期，并告诉我条款写在哪一页。”
-
-假设你正在开发一个面向专业顾问的资料查询服务。收到这句话时，最容易想到的是：从知识库找到相关文字，把文字交给大语言模型，再把答案返回。这个程序能在很短时间内写出来。真正接入用户之后，问题会自然延伸：检索第一次只拿到定义，没有拿到例外条件怎么办？同一个请求因网络超时被提交两次怎么办？工具取得结果后服务进程退出怎么办？另一个服务又怎样知道任务已经完成？
-
-这些问题把一次模型调用扩展成了一个可以长期运行的软件系统。这里讨论的 **Harness（智能体执行控制系统）**，就是让模型与工具的执行具有可信入口、明确身份、可控生命周期、持久事实和稳定输出的产品运行层。
-
-本文以保险条款检索为贯穿案例，主要从真实实现解释 Harness。你不需要熟悉保险业务；示例产品、条款、运行 ID 和日志片段都采用**明确标注的合成数据**。涉及已有工程成果的地方，会给出源码位置和测试依据，区分“源码已经实现的行为”“历史测试验证的行为”与“帮助理解的演示轨迹”。
-
-读完本文，应该能够从一条输入实际画出：HTTP 请求如何创建运行对象，Worker 怎样领取任务，SDK 怎样调用模型和工具，事实怎样写入数据库，以及外部如何读到运行事件。
-
-<details open>
-<summary><strong>快速认识本文的三种材料</strong></summary>
-
-| 标记 | 代表什么 | 阅读方式 |
-| --- | --- | --- |
-| **源码摘编** | 来自已读取的 TypeScript 实现，保留关键调用和条件 | 对照文末源码路径理解真实机制 |
-| **合成协议样本** | 手工构造但遵循所展示的协议字段 | 用于认识输入、输出和关联身份 |
-| **历史测试观察** | 项目测试文件中已包含的断言或以其执行记录为依据的结论 | 结合当时源码与测试环境判断覆盖范围 |
-
-实例源码以 `c66112dfd8676b47b143dc2e26739278cf4b0dde` 快照为阅读基准；每段示例都应在自己的环境中复核适用版本。
-
-</details>
-
 ## 01｜从一个具体需求开始：用户实际希望 Agent 做什么？
-
-先看问题本身：
 
 > 请说明示例保障甲的等待期。如果发生意外伤害，该等待期是否仍然适用？请标出原始条款出处。
 
-这其实要求得到三类不同的信息：**等待期的定义或期限**、**意外情形的适用条件**、**可以反向核查的原文来源**。只找到第一类证据，仍然不能把整个问题视为已经充分回答。
+Agent（智能体）是利用模型选择下一步操作，并可调用外部工具的程序。本例要求 Agent 查询资料、核对条件并返回依据。
 
-从用户视角，产品可以表现为一个很普通的问答入口。用户输入目标，系统在执行过程中给出当前状态，完成后返回回答和来源。真正重要的是这些状态都能由服务端事实解释：查询是否开始了、工具是否正在读取、结果是否已提交、任务是否最终结束。
+这个问题需要三类信息：**等待期的定义或期限**、**意外情形的适用条件**和**原始条款出处**。找到等待期定义之后，系统仍需核对意外情形的条件。
+
+用户通过问答入口提交问题。系统查询资料，报告执行状态，并在完成时返回回答和来源。每一种状态都应对应服务端记录。
+
+系统用 Turn（用户回合：一次已受理的输入）保存问题。系统用 Run（执行尝试：处理该输入的一次运行）记录执行过程。后续重试可以为同一个 Turn 创建新的 Run。
 
 <table>
-<thead><tr><th align="left">可观察的界面元素</th><th align="left">其背后的产品事实</th></tr></thead>
+<thead><tr><th align="left">调用方看到的结果</th><th align="left">服务端记录的事实</th></tr></thead>
 <tbody>
 <tr><td><kbd>发送</kbd> 后收到受理标识</td><td>用户输入已经关联到一个 Turn 和 Run</td></tr>
 <tr><td>“正在查询条款”</td><td>模型声明的工具动作及其执行状态</td></tr>
@@ -44,7 +23,7 @@
 </tbody>
 </table>
 
-这一节先只把用户需求翻译成系统需要输出的可观察信息。具体 UI 组件属于应用层；Harness 负责提供这些元素背后的状态和证据。
+Harness（智能体执行控制系统）提供任务状态、内容与运行事件。应用使用这些数据展示进度。
 
 <details>
 <summary><strong>展开：合成咨询结果在数据层可能是什么样</strong></summary>
@@ -69,17 +48,17 @@
 }
 ```
 
-这是一份便于理解的业务答案视图，**不是**该项目已发布的 HTTP DTO。它的作用是展示“某个结论有证据支持、另一个结论仍需查证”这种状态可以被结构化表达。产品的实际 DTO 和工具结果稍后再看。
+这个合成 JSON 分别记录已支持的结论和待补充的条件。`sourceRef`（来源引用）是服务端签发的原文读取标识。值为 `null` 时，当前结果还没有该来源标识。
 
 </details>
 
 ## 02｜最简单的 LLM 问答程序是什么、长什么样？
 
-**LLM（Large Language Model，大语言模型）**在程序里通常体现为一次远程 API 调用。开发者给它输入，服务返回一份结构化 Response（响应）。模型能够生成内容、选择工具，具体由所使用的 API 能力和本次请求决定。
+**LLM（Large Language Model，大语言模型）**接收输入并返回结构化结果。程序通常通过 API（应用程序接口）调用模型。Response（响应对象）可以包含回答文本或工具调用意图。实际输出取决于模型和请求配置。
 
-**Prompt（提示词）**指提供给模型的任务说明及相关上下文。它既可以是直接的用户文字，也可以包含开发者指令、历史消息和外部证据。程序应该清楚区分这些来源，尤其要把来自文档的正文作为待使用数据，而不是当作新的系统指令。
+**Prompt（提示词）**包含任务说明和模型需要的上下文。它可以包含用户问题、开发者指令、历史消息和检索证据。程序把检索正文当作待分析的数据，避免把文档文字当作新的系统指令。
 
-从最简单的场景看，流程就是一份输入和一份输出：
+一次基本模型调用包含输入、API 请求和响应：
 
 ```mermaid
 flowchart LR
@@ -89,7 +68,7 @@ flowchart LR
   O --> A["回答文本"]
 ```
 
-下面是官方 `openai` Node.js SDK 的基本调用形状。`MODEL_ID` 和 API 凭证来自调用者自己的受控配置；代码在实际执行时才会产生网络请求与对应计费。
+Node.js 是服务端 JavaScript 运行环境。`openai` SDK（软件开发工具包）封装模型 API。下面代码发送一次 Responses API（模型响应接口）请求。`MODEL_ID` 和凭证由受控环境提供。
 
 ```ts
 import OpenAI from "openai";
@@ -112,7 +91,7 @@ console.log(response.output_text);
 
 注意 `response.output_text` 是 SDK 提供的便捷文本读取方式。实际响应还可能包含消息条目、用量信息和其他与当前 API 能力有关的结构。因此，“打印文本”只是消费模型结果的一种方式，不等于完整保存了一次执行。
 
-为了理解底层数据，可以把一次**示意性**的响应表示为：
+模型响应的主要字段如下（合成样本）：
 
 ```json
 {
@@ -128,13 +107,13 @@ console.log(response.output_text);
 }
 ```
 
-这是教学化的结构摘录，省略实际 Provider 的其他字段。稍后我们的 Harness 会引入 `ModelStep`，把模型调用、对应输出和产品执行身份连接起来；现在先知道模型 API 实际返回的是**可解析的数据对象**。
+上面的 JSON 只展示模型响应的主要字段。Provider（模型提供方）还可能返回用量和其他元数据。Harness 使用 ModelStep（单次模型调用记录）关联请求、状态和输出。
 
 ## 03｜RAG 是什么？一个检索增强程序长什么样？
 
-**RAG（Retrieval-Augmented Generation，检索增强生成）**在生成之前取得外部知识证据。它把一个“模型直接回答”的程序，变为“先找材料，再根据材料生成回答”的程序。对保险条款、合同、内部规范和知识库问答，这通常是第一个实际可用的技术链。
+**RAG（Retrieval-Augmented Generation，检索增强生成）**先从外部资料取得证据，再让模型依据证据回答。它适合保险条款、合同和知识库查询等需要核对原文的任务。
 
-一份 PDF 进入知识系统时，常见的数据对象有：
+系统处理 PDF 后，通常会产生以下数据：
 
 | 概念 | 是什么 | 可以观察到什么 |
 | --- | --- | --- |
@@ -144,9 +123,9 @@ console.log(response.output_text);
 | Embedding（向量表示） | 由模型把文本编码成数值表示 | 一串浮点数、维度与模型版本 |
 | Evidence（证据） | 一次查询实际取得的相关内容 | 片段、来源、排序信息和元数据状态 |
 
-Embedding 本身通常是一组向量分量，适合检索算法做相似性匹配；它不包含面向人阅读的完整条款解释。检索结果需要携带可读内容与来源信息，模型才能使用它回答问题。
+Embedding 通常由一组数值组成，检索算法用它比较文本的相似程度。模型回答问题时，还需要读取可理解的正文和来源信息。
 
-典型固定 RAG：
+固定 RAG 的执行链如下：
 
 ```mermaid
 flowchart TD
@@ -170,7 +149,7 @@ flowchart TD
 }
 ```
 
-检索响应通常不止一段文本；它还要说明命中的来源。例如一个教学化的 Evidence：
+检索响应通常不止一段文本；它还要说明命中的来源。例如，一条 Evidence 可以包含以下字段（合成样本）：
 
 ```json
 {
@@ -222,9 +201,9 @@ async function answerOnce(
 }
 ```
 
-这段代码展示了输入与输出边界，`retrieve` 和 `generate` 需要由实际服务实现；它本身不包含外部账户、数据库和请求身份。为了让模型理解完整条款，检索取得的正文还应区分引用、可信指令和外部资料内容。
+`retrieve` 和 `generate` 是依赖接口。调用者需要连接实际检索和模型服务。这个函数展示固定 RAG 的数据流。为了让模型理解完整条款，检索取得的正文还应区分引用、可信指令和外部资料内容。
 
-固定链路的调用顺序由代码决定。它既可以成为产品的一项简单能力，也可以作为后续 Agent 查询效果的 **Baseline（对照基线）**：相同问题、相同语料和检索配置下，比较固定一次检索与模型主动补查取得的证据覆盖。
+代码决定固定 RAG 的检索和生成顺序。我们可以把它作为 Baseline（对照基线）。对比时保持问题、模型、语料和检索配置一致，再观察自主补查带来了哪些新证据。
 
 <details>
 <summary><strong>展开：一次固定 RAG 执行记录需要保存什么</strong></summary>
@@ -249,17 +228,17 @@ async function answerOnce(
 }
 ```
 
-这是实验记录的示意，并非项目当前实际导出 Schema。它让后续比较具有明确目标：新增模型自主动作，究竟带来了什么证据，而不是只增加了多少文本。
+这份合成记录展示问题、检索结果和回答状态。Schema（数据结构约束）定义接口字段和类型。对照实验计算新增证据，而不只比较答案长度。
 
 </details>
 
 ## 04｜Tool 是什么？普通业务函数怎样呈现给模型？
 
-**Tool（工具）**首先是一个可以执行的能力。程序员可以把 `searchDocuments(input)` 理解为一份普通业务函数：收到查询参数，调用检索服务，返回结果。
+**Tool（工具）**是一项可调用的能力。例如 `searchDocuments(input)` 接收查询参数，调用检索服务，然后返回数据。
 
-要让模型选择它，程序还需提供模型可见的名称、描述和参数约束。这类包装一般称为 **Function Tool（函数工具）**。它保留了普通函数“输入 → 执行 → 输出”的本质，但把函数规格提供给了模型。
+模型需要知道工具名称、作用和参数结构。**Function Tool（函数工具）**把这些信息提供给模型，并连接实际执行函数。
 
-项目里使用两种不同的名称：
+项目为每个工具保存两种名称：
 
 - `capabilityId`：产品内部的能力标识，例如 `knowledge.search_documents`；
 - `modelName`：提供给模型的函数名，例如 `search_documents`。
@@ -278,7 +257,7 @@ const searchDocumentsInput = z.strictObject({
 });
 ```
 
-上面使用 `z` 表示 Zod（运行时 Schema 校验库），省略了实际项目对 ID 最大长度等共用原语的约束。`content` 是模型生成的**公开动作说明**，用于表达“正在做什么”；真正交给检索业务函数的参数是剩余字段。
+上面使用 `z` 表示 Zod（运行时 Schema 校验库），省略了实际项目对 ID 最大长度等共用原语的约束。`content` 保存模型声明的动作说明。服务端将其他业务参数交给检索函数。
 
 一次完整合法的工具调用参数例如：
 
@@ -292,7 +271,7 @@ const searchDocumentsInput = z.strictObject({
 }
 ```
 
-工具返回也有明确结构。工程的业务结果定义包含 `status`、`data`、`sourceRefs`、`coverage`、`missing`、`warnings` 和 `provenance`。其中 `provenance`（数据来源说明）包含模式、后端身份、数据集版本及观察时间。
+工具结果采用固定字段。`status` 表示业务结果状态，`data` 保存数据，`sourceRefs` 保存来源引用。`coverage` 表示覆盖范围，`missing` 和 `warnings` 说明缺口与警告。`provenance`（数据来源信息）保存后端身份、数据模式、版本和观察时间。
 
 下面展示其中一个合成返回的完整外层形状，`data` 在此使用一条简化证据行供阅读：
 
@@ -337,9 +316,9 @@ const searchDocumentsInput = z.strictObject({
 
 ## 05｜Tool Calling 究竟是什么？模型说“我要查”时发回了什么？
 
-**Tool Calling（工具调用）**不是模型自己在服务器上执行任意代码，而是模型通过一份结构化响应表达“希望调用哪个工具、使用什么参数”。后续实际函数执行由 SDK 与受控运行环境承担。
+**Tool Calling（工具调用机制）**让模型输出工具名和调用参数。这个输出叫 ToolCall（工具调用意图）。SDK 根据意图调用服务端已注册的函数。模型负责选择动作，服务端负责实际执行。
 
-在本项目使用的规范化 SDK 模型事件中，工具调用可以表示成下面的 `function_call` 条目。注意 `arguments` 是一个 JSON 字符串，而非已经执行过的函数返回值：
+本工程把模型的工具意图统一表示为 `function_call`。下面展示一个合成调用。`arguments` 是装有参数的 JSON 字符串。
 
 ```json
 {
@@ -350,7 +329,7 @@ const searchDocumentsInput = z.strictObject({
 }
 ```
 
-这是**按项目 SDK 规范化形状构造的示例**。原始模型供应商在 HTTP 层采用什么字段名称，由适配器和协议版本决定；不要把上述内部规范化对象直接当成所有供应商统一的网络回包。
+这是**按项目 SDK 规范化形状构造的示例**。不同模型服务可以采用不同的网络响应字段。SDK 适配器把它们转为统一的模型条目。
 
 各字段的意义相当具体：
 
@@ -361,7 +340,7 @@ const searchDocumentsInput = z.strictObject({
 | `name` | 模型选择的工具名称 |
 | `arguments` | 模型为工具生成的参数 |
 
-SDK（软件开发工具包）读取意图，找到已注册的函数工具，校验参数并执行，然后把结果转成可以加入会话历史的工具结果条目。对工具循环来说，下面的两个对象需要正确配对：
+SDK 读取 ToolCall，校验参数并执行已注册函数。它把 ToolResult（工具执行结果）写入后续模型可见的历史。对工具循环来说，下面的两个对象需要正确配对：
 
 ```text
 模型输出：function_call（callId = call-syn-001）
@@ -391,11 +370,11 @@ ModelStep S1
 
 ## 06｜Agent 是什么？Agent Loop 在运行时究竟长什么样？
 
-**Agent（智能体）**在这里指一种执行单元：它拥有目标、模型、可以选择的工具，以及根据当前输入和工具结果持续决定下一步的能力。它不需要自己拥有数据库，也不要求必须是多个 Agent 协作；一个 Agent 使用多个工具就可以完成不少实际任务。
+**Agent（智能体）**使用模型根据目标选择动作。它读取当前输入和工具结果，并决定是否继续调用工具。一个 Agent 就可以使用多个工具完成任务。
 
-**Agent Loop（智能体执行循环）**是它最容易观察的执行形态：模型请求、解析输出、必要时调用工具、保存并加入结果、再次调用模型，直到形成最终输出或遇到运行边界。OpenAI Agents SDK（智能体软件开发工具包）负责驱动这种循环。[^sdk-running]
+**Agent Loop（智能体执行循环）**反复处理模型请求和工具结果。模型提出工具调用时，SDK 执行工具并将结果交回模型。模型生成最终回答或达到执行边界时，当前循环结束。OpenAI Agents SDK 负责驱动这套循环。[^sdk-running]
 
-先看最小 SDK 对象的组成：
+Runner（SDK 执行器）驱动 Agent Loop。Session（会话历史接口）提供后续模型请求使用的消息。下面展示主要 SDK 对象：
 
 ```ts
 // 结构摘编：实际模型、工具依赖由外层运行环境提供。
@@ -420,7 +399,7 @@ const stream = await runner.run(agent, userInput, {
 });
 ```
 
-上述选项与工程真实入口一致，`userInput`、`session`、`signal` 和 `recordedModel` 由外层提供；它展示装配形状而非可独立复制运行的完整程序。`tracingDisabled` 的使用需要结合实际数据授权策略。
+上述代码展示 SDK 的装配方式。运行时需要提供 `userInput`、`session`、`signal` 和 `recordedModel` 等实际依赖。`tracingDisabled` 的使用需要结合实际数据授权策略。
 
 如果想知道“循环到底发生了什么”，可以按模型步骤观察。假设第一次检索只找到等待期定义，第二次模型要求补充原文，第三次形成回答：
 
@@ -444,7 +423,7 @@ sequenceDiagram
 
 这是**可由模型选择的合理路径**，并非每个问题必须经过三个模型请求。模型可能第一次直接回答，也可能连续查证多次。一次模型调用可以输出多个工具意图，工具执行也可能并发。
 
-三个经常混淆的计数应从这里开始分开：**用户发起一次 Turn**，SDK 内部可能经历多个 loop iteration，而产品的 **ModelStep** 用来记录一次模型请求尝试。后面工具还会获得独立 **ToolInvocation** 记录。只有分别建模，才能知道成本来自模型、执行还是业务服务。
+执行系统分别统计用户回合、SDK 循环和模型请求。用户提交一个 Turn，SDK 可能多次请求模型。每次请求尝试由 ModelStep 记录。后面工具还会获得独立 **ToolInvocation** 记录。只有分别建模，才能知道成本来自模型、执行还是业务服务。
 
 <details>
 <summary><strong>展开：一段带有调用结果的合成模型历史</strong></summary>
@@ -475,7 +454,7 @@ sequenceDiagram
 ]
 ```
 
-这里只展示**阅读层面的精简历史**，不是可以原样提交给 SDK Session parser 的完整 `ModelItem[]`。真实结构还包含状态和内容部件等字段，实际对象需按锁定 SDK 的 Schema 读取。
+这里省略了 ModelItem（SDK 规范化消息条目）的部分字段。正式 Session 使用结构解析器（parser）校验完整数据。
 
 </details>
 
@@ -483,11 +462,11 @@ sequenceDiagram
 
 ## 07｜Harness 是什么？在真正的软件项目里长什么样？
 
-可以把 **Harness** 看作包围 Agent Loop 的产品执行层。它接收用户或服务的命令，创建和调度运行，提供模型与工具所需依赖，记录已发生的事实，并提供对外查询与观察接口。
+**Harness（智能体执行控制系统）**接收任务，创建运行对象，并调度 Agent Loop。它保存运行状态、内容和事件，并提供外部查询接口。
 
-它既不必是一个独立 npm 包，也不必拆成很多微服务。当前工程采用 **TypeScript / Node.js 服务 + PostgreSQL + 持久队列 + OpenAI Agents SDK** 的组合；首版以单 Agent 模式运行，每次 Run 的模型、历史和工具依赖在可信服务端装配。[^goal]
+当前工程将控制面、Runner 和工具注册装入一个 TypeScript / Node.js 服务。PostgreSQL（关系数据库）保存持久状态。pg-boss（基于 PostgreSQL 的队列组件）保存待执行的任务。每个 Run 使用一个 Agent，由服务端装配模型、历史和工具依赖。[^goal]
 
-从源码目录来看，它实际就是若干职责清楚的模块：
+Worker（后台任务执行器）从队列领取 Run。RunnerFacade（运行门面）建立单次 Run 的 SDK 执行环境。Registry（工具注册系统）管理可用工具及其后端绑定。源码目录如下：
 
 ```text
 apps/runtime/src/
@@ -496,10 +475,10 @@ apps/runtime/src/
 │   ├── runtime.ts
 │   ├── registry.ts
 │   └── synthetic-worker.ts
-├── transport/http/       # HTTP 控制面、Schema、SSE
+├── transport/http/       # HTTP 控制面、Schema、SSE（事件流）
 │   ├── app.ts
 │   └── sse.ts
-├── control/              # Principal 与运行权限
+├── control/              # Principal（认证主体）与运行权限
 ├── storage/              # PostgreSQL、事务、队列、事实、检查点
 │   ├── schema.ts
 │   └── store.ts
@@ -509,15 +488,15 @@ apps/runtime/src/
 │   ├── model.ts
 │   ├── tools.ts
 │   └── session.ts
-├── registry/             # 工具规格、Profile、后端绑定
-└── business/             # 检索、来源、目录、事实等业务 Port/Adapter
+├── registry/             # 工具规格、Profile（运行配置）、后端绑定
+└── business/             # Port（业务接口）与 Adapter（业务适配）
 packages/contracts/src/  # HTTP/事件/工具契约
 tests/                   # 控制面、SDK、Runner、恢复与事件测试
 ```
 
-这份目录树来自已读取的项目结构，省略了具体辅助模块。它比概念图更直接：你能够找到启动入口、函数工具绑定、模型包装器、数据库表定义和事件输出函数。
+目录中的文件负责启动、工具绑定、模型调用、数据存储和事件输出。
 
-**运行起来以后长什么样？** 它会提供类似以下的 HTTP 能力：
+运行中的 Harness 提供以下 HTTP 接口：
 
 | 接口类型 | 示例路径 | 用户或程序实际能做什么 |
 | --- | --- | --- |
@@ -529,7 +508,7 @@ tests/                   # 控制面、SDK、Runner、恢复与事件测试
 | 工具细节 | `GET /v1/runs/{runId}/tool-invocations` | 读取工具执行记录 |
 | 事件 | `GET /v1/threads/{threadId}/events` | 重放并持续观察执行变化 |
 
-其中路径花括号是变量。API 的对象归属、身份认证和数据 Schema 均由服务端管理；具体操作还包含取消、重试、恢复、历史和来源查询。第一篇先认识入口和输出，完整 API 契约留到后续章节。
+其中路径花括号是变量。服务端管理 API 资源归属、认证和 Schema。控制面还提供取消、重试、恢复、历史与来源读取能力。这一组接口构成运行入口与输出边界。其他控制操作将在后续专题深入。
 
 ### Harness 的一张物理与逻辑关系图
 
@@ -557,12 +536,14 @@ flowchart TB
   Registry <--> Business
 ```
 
-这个图把“物理可以在同一 Node 进程中”和“逻辑上分成多层”同时表达出来。数据库与模型服务位于边界之外，Node 内部则可以随规模扩展为不同进程，但执行语义保持一致。
+Fastify 是 Node.js HTTP 服务框架。Principal 保存机构、用户和权限范围。Profile 指定可用模型和工具。SSE（Server-Sent Events，服务器发送事件）通过 HTTP 持续输出运行变化。
+
+这些组件可以位于同一个 Node.js 进程中。数据库与模型服务通过独立接口连接。后续可以调整进程部署，而保留相同的执行契约。
 
 <details>
 <summary><strong>展开：本项目的合成启动模式到底验证了什么？</strong></summary>
 
-`SyntheticControlModel` 是一个实现 SDK Model 接口的本地确定性模型，回复固定文本：
+`SyntheticControlModel`（合成控制模型）按固定规则返回文本。它实现 SDK 的 Model 接口：
 
 ```text
 合成模式：控制面执行链已完成。
@@ -570,15 +551,15 @@ flowchart TB
 
 它也会产生模型完成所需的规范化事件，并通过真正的 Worker、RunnerFacade 和数据库走完生命周期。这条路径验证服务受理与执行、内容提交和事件输出，但该固定模型**不会自动发起工具调用**。
 
-要验证自主工具循环，需要受控 `ScriptedModel`（会按测试剧本返回 `function_call` 的模型）或已授权真实模型。在第一篇后半段，我们会把两种模式分别展示，避免把“工具目录可见”直接等同于“模型实际调用过工具”。
+工具调用测试使用 ScriptedModel（按测试剧本返回模型输出的替身）或已授权真实模型。工具目录可见与实际工具执行是两个不同的结果。
 
 </details>
 
 ## 08｜最重要的执行对象有哪些？Thread、Turn、Run 长什么样？
 
-理解 Harness 的最快方式，是先认识它真正保存了哪些对象。当前实现没有把“一段聊天文本”当作全部状态，而是保留**持续对话、用户回合、执行尝试、模型调用、工具执行和内容事实**几种不同身份。
+Harness 保存多种身份。Thread（对话线程）保存持续对话，Turn 保存用户输入，Run 保存执行尝试。ModelStep 记录一次模型调用，ToolInvocation 记录一次工具执行。Runtime Item（运行条目）保存内容事实。
 
-先观察一个完整关系：
+先看这些对象怎样关联：
 
 ```mermaid
 flowchart TD
@@ -598,37 +579,37 @@ flowchart TD
 
 ### Thread：一段持续存在的对话
 
-Thread（对话线程）拥有自己的 ID、机构和主体归属、状态、资源版本，以及顺序递增的事件游标。顾问连续询问同一款产品，两个回合可以属于同一 Thread。
+Thread 拥有 ID、所属机构、主体、状态和资源版本。它还维护递增的事件序号。同一顾问的连续追问可以属于同一个 Thread。
 
 它解决的问题是：**哪段历史属于一起？谁有权读取和继续它？**
 
 ### Turn：一次正式受理的用户输入
 
-Turn（用户回合）带有线程内顺序、`userInputRef`、当前 Run ID 和 `finalContentRef`（最终内容引用）。第一次问等待期是一个 Turn，随后问意外例外是新的 Turn。
+Turn 有线程内的顺序号和 `userInputRef`（用户输入条目引用）。它还保存当前 Run ID 和 `finalContentRef`（最终内容引用）。第一次提问与后续追问属于两个 Turn。
 
 它解决的问题是：**用户到底交给系统哪一次输入？哪个回答属于这次输入？**
 
 ### Run：完成一个 Turn 的一次执行尝试
 
-Run（执行尝试）持有状态、尝试次数、工具集快照身份、队列任务 ID、模型与工具用量，以及重试或恢复关联。一个 Turn 遇到失败后重新执行，可以产生新的 Run，而保留原输入和原尝试记录。
+Run 保存执行状态、尝试次数、任务 ID、配置快照与用量。它还能指向前一次重试或恢复的来源。失败后重新执行会创建新 Run，原输入和旧执行记录继续保留。
 
 它解决的问题是：**这一次实际执行从何开始、现在怎样、最后如何结束？**
 
 ### ModelStep：一次模型调用尝试
 
-ModelStep 记录 Run 内调用顺序、状态、请求标识（如果取得）、开始结束时间以及输出条目引用。当前包装器在调用模型 Provider 前先创建 Step，并在响应完成时提交规范化模型输出。
+ModelStep 保存模型调用顺序、状态、时间和输出引用。`RecordedModel`（模型调用记录器）在发送请求前创建步骤。收到模型响应后，它提交规范化输出和步骤终态。
 
 它解决的问题是：**第几次进入模型边界？模型实际返回了哪些条目？**
 
 ### ToolInvocation：一次工具执行实例
 
-ToolInvocation 保存模型步骤关联、调用 ID、能力与版本、参数、结果引用、来源集合和执行状态。工具的结果可以在模型步骤已经结束之后才返回。
+ToolInvocation 保存 `modelStepId`、调用 ID、工具能力及版本、参数和执行状态。完成后，它引用工具结果及来源。工具可能在模型步骤结束之后才返回。
 
 它解决的问题是：**模型提出的那个动作是否实际执行过？结果是否提交了？**
 
 ### Runtime Item：一条权威内容事实
 
-Runtime Item（运行条目）保存用户输入、模型输出、工具调用和工具结果的规范化内容。其 `canonical` 字段保留 SDK 规范化结构，条目 ID 供 Session、工具结果和最终内容引用。
+Runtime Item 保存用户输入、模型输出、工具调用和工具结果。`canonical`（权威规范化内容）保存 SDK 可识别的数据结构。SDK Session（会话历史接口）按条目 ID 引用这些内容。
 
 它解决的问题是：**哪一份内容已经正式写入，其他读取路径该引用哪一份？**
 
@@ -669,15 +650,15 @@ Runtime Item（运行条目）保存用户输入、模型输出、工具调用�
 }
 ```
 
-这是一份**将多个真实对象投影合并后的教学视图**；产品实际 HTTP 接口分别返回 Thread、Turn、Run、ModelStep 和 ToolInvocation 对象，不存在需要一次返回以上所有字段的通用 `getEverything` 接口。
+这份合成 JSON 合并展示多个对象。实际 HTTP 接口分别读取 Thread、Turn、Run、ModelStep 和 ToolInvocation。每个实体在服务端都有自己的身份。
 
-为什么需要如此多的 ID？因为故障定位依靠稳定关系。例如 `ToolInvocation.modelStepId` 表示动作来自哪个模型响应，`resultItemRef` 指向已经持久化的结果，`Turn.finalContentRef` 指向最终已提交的助手条目。同样的回答文本出现两次，也不应让两个实际发生的条目共享一个内容 ID。
+这些 ID 用来保持执行关系。`ToolInvocation.modelStepId` 指向提出动作的模型步骤。`resultItemRef` 指向已保存的工具结果，`Turn.finalContentRef` 指向最终助手条目。即使两次输出的文字相同，它们仍拥有不同的事实身份。
 
 </details>
 
 ## 09｜执行状态是什么？程序怎样知道任务是否已经结束？
 
-在页面上看到一个“处理中”，很容易以为程序内部也是一个布尔变量。实际 Harness 必须管理几种不同对象的生命周期（Lifecycle）。
+Lifecycle（生命周期）是对象从创建到结束的状态变化。Harness 分别管理 Run、ModelStep 和 ToolInvocation 的状态。
 
 以 Run 为例，可以将主流程画成：
 
@@ -720,13 +701,13 @@ Run queued
   → run.completed
 ```
 
-这是一条成功单工具测试可以产生的**事件类型子序列**。实际事件之间还可以插入 `content.delta`、`checkpoint.created` 等事件；不应以一个示意序列替代系统支持的全部事件协议。
+这是一次单工具执行的事件子序列。实际轨迹还可能包含 `content.delta`（内容增量事件）和 `checkpoint.created`（检查点创建事件）。
 
 ## 10｜Event 是什么？Harness 对外的一帧消息长什么样？
 
-**Runtime Event（运行事件）**描述一条已经发生并持久记录的产品变化。例如 Run 被受理、模型调用完成、工具结果已经提交。Event 的用途是让外部调用方按既定顺序观察执行，而不必把内部 SDK 对象直接交出去。
+**Runtime Event（运行事件）**记录已经提交的状态变化。常见事件包括 Run 开始、模型步骤完成和工具结果提交。调用方使用这些事件按顺序观察运行。
 
-本实现的事件具有共同信封（Event Envelope）：
+Event Envelope（事件信封）包含事件的共同字段：版本、身份、顺序、时间、类型与数据。实际结构如下：
 
 ```json
 {
@@ -745,7 +726,7 @@ Run queued
 }
 ```
 
-`eventId` 是事件身份，`seq` 是 Thread 内的顺序游标。`seq` 使用十进制字符串，是因为 PostgreSQL `bigint` 的范围超过 JavaScript 普通 Number 的全部安全整数范围。外部处理需要按协议保留其精度。
+`eventId` 标识事件，`seq`（线程内顺序号）确定事件次序。`seq` 使用十进制字符串。这样可以保留 PostgreSQL `bigint`（64 位整数）的完整精度。
 
 不同 `type` 对应不同 `payload`。例如 `run.queued` 保存运行 ID，`model_step.completed` 保存 Step ID，`tool_invocation.completed` 保存执行 ID 和结果条目引用。具体 Schema 位于 `packages/contracts/src/events.ts`。
 
@@ -763,21 +744,21 @@ data: {"schemaVersion":"1.0","eventId":"SYN-EVENT-07","threadId":"SYN-T-01","seq
 <details>
 <summary><strong>展开：运行事件与模型流式事件有什么关系？</strong></summary>
 
-模型流可能产生 `output_text_delta`（文本增量）、`response_done`（当前模型响应结束）等 SDK 事件。`RecordedModel` 会把这些事件处理成产品事实：例如将文本增量累积到某一助手条目，并写入 `content.delta`；当前模型响应完成后提交 ModelStep 和规范化输出。
+模型流可能产生 `output_text_delta`（文本增量）、`response_done`（当前模型响应结束）等 SDK 事件。`RecordedModel`（记录模型调用的包装器）处理 SDK 事件。它将文本增量写入助手条目，并记录 `content.delta`。模型响应结束时，它提交 ModelStep 和规范化输出。
 
 因此，模型流事件是**模型边界收到的变化**，Runtime Event 是**产品经过规则处理并写入的运行变化**。二者相关，但不需要共享同一套对象格式。
 
-当模型输出已提交后，`finalContentRef` 为最终内容提供稳定引用；事件读取、历史读取和对话导出可以沿同一个引用取得相同内容，而不是各自维护一份可能发生偏差的副本。
+`finalContentRef` 指向已提交的最终助手条目。事件、历史和导出功能使用这个引用读取相同内容。这避免了多份答案数据产生差异。
 
 </details>
 
 ## 11｜服务是怎样启动的？从 `start.ts` 看到真实装配过程
 
-前面认识了对象与协议，现在可以顺着真正的程序执行路径往下走。程序运行起来的第一步，还没有用户问题：它要先知道数据库在哪里、当前采用什么身份配置、提供哪些工具、使用什么模型实现。
+服务启动时，程序先加载数据库、身份配置、模型与工具集合。准备好依赖后，它再启动 HTTP 服务和后台 Worker。
 
-工程启动入口是 `apps/runtime/src/composition/start.ts`。它首先读取私有配置引用，选择 Synthetic（合成）或已经被明确配置和授权的产品运行模式，之后建立 Registry（工具注册系统）所需的能力与快照解析器，最后调用 `composeRuntime()`。
+`apps/runtime/src/composition/start.ts` 是启动入口。它读取私有配置引用，并选择 Synthetic（合成）或已授权的产品运行模式。随后，它装配工具注册系统和运行快照解析器，并调用 `composeRuntime()`。
 
-这里有一个容易忽略的设计点：**配置引用只是服务端加载私有内容的路径，模型与业务服务的秘密值不应跟随用户请求在 HTTP 正文中传入。** 本地测试和部署时，配置路径可以作为环境变量输入：
+配置引用是服务端读取私有配置的文件路径。密钥、模型凭证和连接参数由服务端加载。用户请求不携带这些秘密值。 本地测试和部署时，配置路径可以作为环境变量输入：
 
 ```bash
 # 在已安装锁定依赖的项目目录使用合成环境。
@@ -788,11 +769,11 @@ export INSURANCE_HTTP_CONFIG=/absolute/private/http-config.json
 corepack pnpm runtime:start
 ```
 
-这段命令展示真实项目脚本和必需配置入口；私有 JSON 的完整内容由环境及仓库配置规范决定。不能把示意路径直接当成一个已经存在的部署。
+命令使用项目实际启动脚本。操作者需要在私有配置文件中设置合法的数据库与 HTTP 参数。
 
 ### Composition Root 是什么？
 
-**Composition Root（依赖装配入口）**不是一个抽象名词堆砌的模块，它就是创建组件、连接依赖并负责释放资源的位置。`composeRuntime()` 的实际顺序非常直接：
+**Composition Root（依赖装配入口）**创建组件，传入依赖，并在关闭时释放资源。`composeRuntime()` 实现这个过程：
 
 ```ts
 // apps/runtime/src/composition/runtime.ts：摘出主要创建顺序。
@@ -819,15 +800,15 @@ await maintenance.start();
 
 这是方便阅读的**摘编**：正式代码还处理可选维护配置、类型分支和异常清理。重要的是创建顺序和同一 `storage` 的依赖共享关系。
 
-`createRuntimeStorage` 创建产品数据库访问与队列，`createControlHttpApp` 注册 HTTP 路由，`workerFactory` 创建后台执行器。它们可以在同一个 Node.js 进程里，但彼此并非同一个任务生命周期。HTTP 接受命令，Worker 从持久队列领取任务，存储连接两边的权威状态。
+`createRuntimeStorage` 创建 RuntimeStorage（持久状态访问对象）和队列。`createControlHttpApp` 注册 HTTP 路由，`workerFactory` 创建 Worker。HTTP 接受命令，Worker 领取任务。双方通过同一套持久状态协作。
 
-为什么不直接在 HTTP handler 中写 `await runner.run(...)`？因为模型执行可能持续很久，业务响应需要异步观察、取消或恢复。把“受理”和“完成”分成两种产品行为，就可以让后台任务独立于某一个请求连接存活。
+模型和工具执行可能持续较长时间。HTTP Handler（请求处理函数）负责受理任务，Worker 负责后台执行。调用方可以通过 Run ID 查询、取消或恢复任务。
 
 ### 实际合成运行形态
 
 默认合成装配使用 `createSyntheticRegistryRuntime()` 与 `createSyntheticWorker()`。后者将 `SyntheticControlModel` 放进真正的 `RunnerFacade` 与 `RunWorker`，并使用真实的 `PgSdkSession`（PostgreSQL 会话历史适配器）。
 
-这一点值得特别观察：**合成的是模型输出，不是整套 Harness 的运行过程。** 这样的测试可以让业务和付费模型网络保持隔离，同时验证产品执行生命周期。
+**Synthetic 模式替换模型输出，仍然运行实际 Harness 代码。** 这样可以独立验证任务领取、SDK 执行和结果持久化。
 
 实际启动报告需要区分这几种状态：
 
@@ -836,13 +817,15 @@ await maintenance.start();
 - 当前 Registry 提供了哪些已授权能力；
 - 某次 Run 真正由 Worker 领取并到达终态。
 
-它们分别由不同接口或执行事实确认。一个 `GET /health/ready` 返回成功说明当前健康检查范围内的依赖满足条件，还不足以证明模型已经完成某个具体业务问题。
+它们分别由不同接口或执行事实确认。`GET /health/ready` 表示服务通过已定义的就绪检查。该接口不代表某个具体用户任务已经完成。
 
 ## 12｜一次用户输入怎样变成 Run？从 HTTP 走到 PostgreSQL 事务
 
-准备好服务后，外部调用方先创建 Thread，再提交 Turn。我们以本地合成模式为例，用真实的 API 路由观察两次命令。
+外部调用方先创建 Thread，再提交 Turn。下面使用本地合成模式的真实 HTTP 路由。
 
-**第一步，创建 Thread。**
+每个写命令带有 `Idempotency-Key`（幂等键：用于识别同一请求的重复提交）。Thread 使用 `revision`（资源版本号）检查客户端看到的状态是否仍有效。
+
+**第一步：创建 Thread。**
 
 ```http
 POST /v1/threads HTTP/1.1
@@ -855,9 +838,9 @@ Idempotency-Key: example-create-thread-001
 }
 ```
 
-一个成功的创建操作返回 `201 Created`，生成 Thread ID 和初始 revision（线程资源版本）。这里的 `<TEST_TOKEN>` 是占位符，需要在已授权的本地环境中替换。
+创建成功后，接口返回 `201 Created`、Thread ID 和初始 `revision`。`<TEST_TOKEN>` 是测试令牌占位符。
 
-**第二步，向该 Thread 提交用户问题。**
+**第二步：向该 Thread 提交用户问题。**
 
 ```http
 POST /v1/threads/{threadId}/turns HTTP/1.1
@@ -874,9 +857,9 @@ Idempotency-Key: example-submit-turn-001
 }
 ```
 
-`synthetic-profile` 是项目受控 HTTP 测试所采用的示例配置名称。它能否在实际实例中使用，取决于当前服务加载的 Profile 与权限；实际 `threadId` 取上一步返回的值。
+`synthetic-profile` 是本项目测试用的 Profile（运行配置名称）。实际可用的 Profile 由服务端配置和当前权限决定。请求中的 `threadId` 使用第一步返回的值。
 
-受理成功时，返回 `202 Accepted` 与一组稳定标识：
+受理成功时，接口返回 `202 Accepted` 与三个执行标识：
 
 ```json
 {
@@ -888,13 +871,13 @@ Idempotency-Key: example-submit-turn-001
 }
 ```
 
-**这是一份示意值的 `AcceptedTurn` 响应**。正式接口生成实际 ID；字段形状来自当前项目的合同。`202` 说明受理成功，之后可以用 `runId` 查询运行状态，用 `eventsPath` 观察事件，而不必让提交请求一直等待模型结束。
+`AcceptedTurn`（回合受理回执）包含 Thread、Turn 和 Run 的 ID。`runId` 用于查询任务状态，`eventsPath` 指向事件流。接口返回 `202` 时，后台执行可以继续进行。
 
 ### `submitTurn()` 真正写入了什么？
 
 后端进入 `createControlHttpApp()` 的 `submitTurn` 分支，再调用 `RuntimeStorage.submitTurn()`。
 
-该函数在一个 PostgreSQL 事务里处理：当前主体与 Thread 归属、幂等命令重放、Thread 行锁与版本、可信 RunSnapshot（运行快照），然后创建用户输入条目、Turn、Run、事件和 pg-boss Job。
+`submitTurn()` 在一个 PostgreSQL 事务中检查主体、Thread 归属、幂等键和资源版本。它解析 RunSnapshot（运行配置快照：保存本次模型、工具和策略身份）。然后创建用户条目、Turn、Run、事件与 Job（持久队列任务）。
 
 ```mermaid
 sequenceDiagram
@@ -913,7 +896,7 @@ sequenceDiagram
   H-->>C: 202 + threadId/turnId/runId
 ```
 
-这里的 “COMMIT” 是重要完成条件：只有事务中所有必须保持一致的记录一起成功，API 才能返回已受理事实。Job 通过 `fromDrizzle(tx, sql)` 使用相同数据库事务；因此不会自然出现“Run 已提交、队列却完全没有对应 Job”的半完成双写结果。
+COMMIT 表示数据库事务成功提交。`fromDrizzle(tx, sql)` 让 pg-boss Job 与 Run 使用同一个事务。Run、事件和 Job 因此共同提交或共同回滚。
 
 关键源码（删去部分事务参数以突出关系）：
 
@@ -947,15 +930,15 @@ await this.boss.send(this.queueName, { runId }, {
 });
 ```
 
-源码里还会更新 Thread revision 并保存幂等回执。注意 `RunSnapshot` 从服务端可信配置解析，用户通过 `agentProfileId` 选择已允许配置，而不负责直接提交模型密钥或任意后端地址。
+源码还会更新 Thread 的 `revision` 并保存幂等回执。服务端根据 `agentProfileId` 解析可信的 RunSnapshot。模型凭证和业务后端地址由服务端管理。
 
 ### 为什么需要 Idempotency-Key？
 
-如果 HTTP 受理成功但响应在网络上丢失，调用方可能重试相同请求。**Idempotency（幂等）**让相同身份的命令返回原始受理对象，而不是新创建一次任务。真正判断时要同时核对当前主体、命令作用域、幂等键以及正文摘要。
+HTTP 响应可能在网络中丢失。**Idempotency（幂等处理）**使合法的重复请求返回原始回执。存储层会核对主体、命令范围、幂等键和请求正文摘要。
 
-已有控制面集成测试使用真实 PostgreSQL，验证相同键与相同输入得到相同响应、数据库只保存一次 Run 和用户输入，队列有对应 Job；同键不同正文则返回 `409 IDEMPOTENCY_CONFLICT`。同 Thread 并发不同命令另有 `THREAD_BUSY` 约束。
+已有 PostgreSQL 集成测试检查重复提交。同键同正文返回相同 ID，存储只创建一条 Run 和用户输入。同键不同正文返回 `409 IDEMPOTENCY_CONFLICT`。同一 Thread 的并发新命令还受到 `THREAD_BUSY` 约束。
 
-这说明一个简单的 `202` 响应背后，已经包含可复现的任务身份与事务语义。后续 Worker 就以这份受理事实开始执行。
+`202` 回执关联持久化的任务与队列记录。Worker 依据这些记录开始执行。
 
 <details>
 <summary><strong>展开：合成受理之后，内部最小事实图是什么样</strong></summary>
@@ -980,9 +963,9 @@ Thread SYN-T-01
 
 ## 13｜谁开始执行 Run？从 Worker 到两次 ModelStep
 
-### 第一段：持久队列交给 Worker
+### 第一步：Worker 领取队列任务
 
-`RunWorker.start()` 从 pg-boss 领取 Job 数据，读取其中的 `runId`，调用 `claimRun()` 获得执行租约（Lease）。
+`RunWorker.start()` 从 pg-boss 获取 Job（队列任务）。Job 携带 `runId`。Worker 调用 `claimRun()` 取得 Lease（执行租约：限定执行者的有效写入资格）。
 
 ```ts
 // runner/worker.ts：核心路径摘编
@@ -1005,13 +988,13 @@ if (!claimed) continue;
 await facade.execute(claimed);
 ```
 
-真实代码的 `settleUnclaimedRun` 返回规则还涉及已取消任务和其他终态；这段摘编强调调用顺序。领取资格时，数据库检查状态、租约和版本，写入 `run.started` 事件并返回带 Lease 的 `ClaimedRun`。
+`settleUnclaimedRun` 处理尚未被领取的终止任务。`claimRun()` 检查 Run 状态和租约。领取成功后，数据库写入 `run.started`，并返回 ClaimedRun（已取得执行资格的 Run 对象）。
 
-Lease（执行租约）可以理解为当前 Worker 进行状态提交的有效资格。它包含 `ownerId`、`fence`（单调代次标记）和 `expiresAt`。后续写入需要验证这份资格，防止旧执行器在失去控制权后继续提交结果。
+Lease 包含 `ownerId`（执行者 ID）、`fence`（执行资格代次）和 `expiresAt`（失效时间）。存储在每次关键写入时检查租约。旧执行器失去资格后，不能覆盖新的运行状态。
 
-### 第二段：RunnerFacade 组装本次执行
+### 第二步：RunnerFacade 组装本次执行
 
-`RunnerFacade.execute(claimed)` 是产品执行与官方 SDK 的连接入口。它做几项具体事情：解析预算，建立 `AbortController`（运行取消控制器），创建运行环境，读取模型和工具绑定，构造 `PgSdkSession`（会话历史适配器），再创建 `RecordedModel` 和 SDK Tools。
+`RunnerFacade.execute(claimed)` 是产品执行与官方 SDK 的连接入口。`RunnerFacade.execute()` 解析预算并创建 `AbortController`（取消信号控制器）。它读取模型和工具绑定，并建立 RunEnvironment（本地运行环境）。随后，它创建 `PgSdkSession`（PostgreSQL 会话历史适配器）、`RecordedModel` 和 SDK 工具。
 
 真实组装形状：
 
@@ -1052,7 +1035,7 @@ const runner = new Runner({
 });
 ```
 
-`instructionsFromSnapshot` 是便于阅读的占位变量；实际代码从 `claimed.snapshot.modelConfig.instructions` 读取可信配置，并提供默认指令。`dependencies`、`environment` 和 `facts` 也来自实际门面上下文；摘编用于展示组装关系。
+源码从 `claimed.snapshot.modelConfig.instructions` 读取模型指令。示例中的 `instructionsFromSnapshot` 代表这个配置值。`dependencies` 和 `environment` 由服务端构造，`facts` 用于关联本次运行产生的条目。
 
 这里最关键的一组对象是：
 
@@ -1061,11 +1044,11 @@ const runner = new Runner({
 - **RecordedModel（可记录模型边界）**：包住 Provider 调用并创建 ModelStep；
 - **SDK Tool（模型可调用的函数工具）**：经执行包装器连接业务后端。
 
-ModelContext（模型可见上下文）与 RunEnvironment 不同。模型只会经明确的数据通道看到指令、输入历史、工具定义和工具结果；它不会因为某个服务端对象存在，就自动获得数据库连接或密钥。
+ModelContext（模型可见上下文）包含指令、历史消息、工具定义和工具结果。RunEnvironment 则保存服务端依赖、租约、权限和取消信号。模型请求只接收明确投影给它的数据。
 
-### 第三段：第一次模型请求如何留下记录
+### 第三步：记录第一次模型调用
 
-`RecordedModel.begin()` 在 Provider 请求发出之前先检查输入、调用预算和当前授权，然后保存一个新的 ModelStep。收到完整模型响应以后，`complete()` 提交规范化输出条目和步骤终态。模型可能输出工具调用条目；调用意图的 `callId` 被记录，用于后续工具执行关联。
+`RecordedModel.begin()` 检查模型输入、预算和授权，然后创建 ModelStep。收到完整响应后，`complete()` 保存输出条目并结束该步骤。如果模型输出工具意图，系统会保存 `callId`，供后续调用关联。
 
 ```ts
 // runner/model.ts：两个记录边界的简化调用
@@ -1090,7 +1073,7 @@ await storage.finishModelStep(lease, stepId, {
 
 这里 `currentOrdinal`、`outputItems`、`inputTokens` 代表实际函数在运行中构造的值。这个片段展示核心调用关系，不是独立可执行函数。
 
-重要区别是：**ModelStep 完成意味着此次模型响应结束，工具执行可以在这之后才开始。** 因此一次模型响应若提出查询意图，状态序列可以是：
+**ModelStep 完成表示本次模型响应结束。** 如果响应包含工具调用意图，工具随后才开始执行。状态序列例如：
 
 ```text
 model_step.started (S1)
@@ -1101,15 +1084,15 @@ model_step.started (S2)
 model_step.completed (S2)
 ```
 
-这是基于实际存储边界的合理单工具轨迹。Provider 的实际请求次数还应结合传输与重试记录判断；当前源码在 Runner 配置里关闭了隐式模型重试，并为模型调用尝试建立单独步骤。
+上述轨迹用于展示模型与工具的记录顺序。真实网络请求次数需要结合传输日志核对。当前 Runner 配置关闭了隐式模型重试。
 
-### 第四段：工具真正执行并保存结果
+### 第四步：执行工具并保存结果
 
-模型的 `callId` 进入 `createRunTools()` 后，执行包装器验证调用属于当前 Run、对应模型步骤已经记录、工具版本与权限合法、执行预算仍可使用，然后创建 ToolInvocation。
+`createRunTools()` 检查当前 Run、模型调用 ID、工具版本、权限和预算。检查通过后，工具包装器创建 ToolInvocation。
 
-实际 `execute` 阶段将业务参数交给 `binding.execute`；取得结果后会按业务输出 Schema 校验，检查返回体字节上限并提取 `sourceRefs`（来源引用集合）。
+`binding.execute`（后端执行绑定）调用业务函数。包装器检查结果 Schema 和字节上限。它还提取 `sourceRefs`（来源引用集合）。
 
-与普通函数调用相比，Harness 的关键步骤是**结果先持久化，再允许 SDK 将结果用于下一次模型调用**。SDK 0.18.0 的 `customDataExtractor` 回调为它提供了准确的工具结果条目：
+Harness 先保存工具结果，再允许 SDK 将结果用于下一次模型调用。`customDataExtractor`（SDK 工具结果提取回调）提供需要持久化的结果条目：
 
 ```ts
 // runner/tools.ts：关键的结果提交顺序（摘编）
@@ -1135,7 +1118,7 @@ pending.delete(toolCall.callId);
 
 ## 14｜最终内容和事件究竟怎样产生？
 
-当 SDK 取得工具结果之后，会把结果加入下一次模型请求。若模型第二次生成了最终回答，`RecordedModel` 把助手输出写成已提交 Runtime Item（权威运行条目）。`PgSdkSession` 再把对应条目引用纳入当前模型历史视图。
+SDK 将工具结果加入下一次模型请求。模型输出最终回答后，`RecordedModel` 保存助手条目。`PgSdkSession` 把该条目的 ID 加入有序历史引用。
 
 一条简化的执行结果可以是：
 
@@ -1150,7 +1133,7 @@ Run R1
   Run.status → completed
 ```
 
-`finalContentRef`（最终内容引用）保存的是条目 ID，而不是另一份复制的最终答案。`RunnerFacade` 等待 SDK stream 完成，读取最终助手条目引用，再调用 `RuntimeStorage.finishRun()`。
+`finalContentRef` 只保存最终助手条目 ID。`RunnerFacade` 等待 SDK 流执行结束，然后调用 `RuntimeStorage.finishRun()` 提交运行终态。
 
 ```ts
 // runner/facade.ts：成功收尾的核心关系（摘编）
@@ -1170,7 +1153,7 @@ await storage.finishRun(lease, {
 });
 ```
 
-`finishRun()` 在事务中检查引用有效性、当前租约和取消条件，然后提交 Turn/Run 终态与相关事件。对“最终内容已经在模型边界提交”的路径，`finalContentRef` 直接指向已有助手条目；仅在调用方显式提交新 `finalItem` 时，存储才会额外按该路径发出 `content.committed`。因此，应该依据最终引用和终态判断事实，而不能把某一种可选事件模式硬编码成所有成功运行的必经序列。
+`finishRun()` 在事务中检查最终引用、租约和取消状态。它提交 Turn、Run 的终态以及事件。对于已保存的助手条目，系统直接复用 `finalContentRef`。如果调用方提交新的 `finalItem`（最终助手条目），该路径还会产生 `content.committed` 事件。外部应结合最终引用和 Run 终态判断执行结果。
 
 ### SSE 是怎么把这些事件送出去的？
 
@@ -1222,15 +1205,15 @@ sequenceDiagram
 
 ## 15｜现在再比较：LLM、固定 RAG、Agent Loop 与 Harness 有什么区别？
 
-已经见过具体代码，才适合讨论抽象层的差异。
+下面使用前面的模型、工具和运行记录比较几种执行方式。ModelRequest（模型请求对象）包含消息、工具定义和模型设置。
 
-**LLM（模型）**是接受输入并产生结构化输出的计算服务。它可以给出文字，也可以返回工具调用意图。
+LLM 接收输入并返回结构化输出。它可以返回回答文本，也可以返回 ToolCall。
 
-**固定 RAG** 是一种预先安排好的程序：先检索，再拼接材料和提示词，最后调用模型。检索几次、是否扩页，取决于开发者写好的流程。
+**固定 RAG** 按代码指定的顺序检索和生成。程序决定检索次数及是否读取更多原文。
 
-**Agent Loop（智能体执行循环）**把工具选择放到模型与 SDK 的迭代中。模型根据当前历史和工具结果选择动作，SDK 执行并将结果送回后续模型请求。
+**Agent Loop** 根据模型输出推进工具调用。模型根据历史和工具结果选择动作。SDK 执行工具，再发送下一次模型请求。
 
-**Harness（产品执行系统）**则承载这段执行进入真实服务后必须满足的约束：可信入口、任务身份、授权、预算、持久状态、运行调度和事件输出。
+**Harness** 管理受理、任务身份、权限、预算和持久状态。它还负责调度执行和输出运行事件。
 
 | 对象 | 真正管理的事 | 最有代表性的输入与输出 |
 | --- | --- | --- |
@@ -1239,113 +1222,113 @@ sequenceDiagram
 | Agent Loop | 模型—工具—模型的连续执行 | 模型响应中的 ToolCall → ToolResult → 下一次请求 |
 | Harness | 持久执行、权限、状态与外部契约 | 提交 Turn → Run/ModelStep/Invocation → Events |
 
-它们不是四种互斥产品。一个 Harness 可以运行 Agent；Agent 使用的某个检索工具内部也可以采用固定 RAG。我们区分的是**抽象层次与责任**。
+这些机制可以组合。Harness 运行 Agent，Agent 又可以调用使用 RAG 的检索工具。各层处理不同的输入和状态。
 
 ### 五组工程上特别容易混淆的对象
 
-**ToolCall 与 ToolInvocation。** `function_call` 是模型表达的动作意图；ToolInvocation 是实际执行记录。调用身份可以先出现，执行可能被权限、版本或预算边界拒绝。这也解释了为什么不能把模型输出的工具名称直接当作“工具已经成功”的事实。
+**ToolCall 与 ToolInvocation。** ToolCall 记录模型选择的动作。ToolInvocation 记录该动作的实际执行和状态。权限、版本或预算检查可能阻止执行。因此，需要执行状态和结果引用确认工具是否成功。
 
-**ModelStep 与 Run。** ModelStep 在一次模型响应完成时结束；Run 是更长的任务执行尝试，可能包含多个 ModelStep 和 ToolInvocation。用一次模型调用的结束时间作为任务结束时间，会使后续业务调用和结果提交落在错误的生命周期里。
+**ModelStep 与 Run。** ModelStep 在一次模型调用结束时完成。Run 可以包含多个 ModelStep 和 ToolInvocation。Run 的结束时间取决于最终任务状态提交，而非某个模型响应。
 
-**HTTP 受理与执行完成。** `202 Accepted` 说明存储已经受理输入和持久任务；`run.completed` 说明执行经过最终状态提交。一个请求可以先拿到 Run ID，再观察后台变化。
+**HTTP 受理与执行完成。** `202 Accepted` 表示存储已经接受任务。`run.completed` 表示 Run 已完成最终提交。调用方可以先取得 Run ID，再观察后台进度。
 
-**SDK Session 与产品历史。** SDK 使用一份有序的历史引用视图，产品还要保留失败尝试、工具调用、结果、来源和检查点等审计事实。对模型输入进行裁剪，不应该连带擦掉完整权威历史。
+**SDK Session 与产品历史。** Session 按顺序提供模型可见消息。产品历史还保存失败尝试、工具执行、来源和检查点。调整模型输入范围时，持久历史保持不变。
 
-**引用存在与业务证据充分。** `sourceRef` 能被当前授权解析，说明来源定位满足相应条件；它引用的正文是否支持“意外免责适用范围”这个结论，仍需依据原文和评测规则判断。
+**来源引用与业务证据。** 当前授权能够解析 `sourceRef`，说明系统可以定位来源。还需要核对原文，才能判断它是否支持对应的业务结论。
 
-这些区别最终决定了代码该写在哪个模块、什么操作需要事务、测试该断言哪些字段，以及产品发生异常时该保存什么。
+这些区别决定模块边界、事务位置和测试断言。发生异常时，系统也能据此确定要保留哪些事实。
 
 ## 16｜模型、SDK、Harness 和业务服务分别承担什么职责？
 
-架构图里的 **Boundary（边界）**可以理解为一份明确的责任约定：什么数据可以进入，谁能决定什么状态，发生错误由哪一层处理，以及下游能够依赖哪一种已成立的结果。
+**Boundary（边界）**是组件之间的输入输出约定。它明确谁能更改状态、谁处理错误，以及下游可以依赖什么结果。
 
-一个简单的例子是：模型返回 `callId = C1` 的查询意图，说明模型选择了工具；工具包装器真正执行并完成持久化，才能说明该调用有成功结果；最终 `finishRun()` 提交后，才能说当前用户任务已经成功完成。
+例如，模型返回 `callId = C1`，说明它选择了工具。工具包装器执行并保存结果后，该调用才具备成功记录。`finishRun()` 完成终态事务后，整个 Run 才算完成。
 
 | 组件 | 它拥有的核心能力 | 可以直接确定的事实 |
 | --- | --- | --- |
-| HTTP Control Plane | 用户命令、认证、幂等、资源版本 | 请求是否受理，关联什么 Thread/Turn/Run |
+| HTTP Control Plane（HTTP 控制面） | 用户命令、认证、幂等、资源版本 | 请求是否受理，关联什么 Thread/Turn/Run |
 | RuntimeStorage | 数据库事务、租约、条目、终态与事件 | 哪些状态和内容已经持久提交 |
 | RunWorker | 队列消费、领取与监督 | 哪个执行者持有当前运行资格 |
 | RunnerFacade | 当前 Run 的执行环境与 SDK 包装 | 运行采用什么预算、信号、依赖与终态规则 |
 | OpenAI Agents SDK | Agent Loop、模型与工具交互、Session 接口 | 循环中的下一次模型与工具处理如何衔接 |
 | RecordedModel | 一次模型调用的边界与规范化输出 | 哪个 ModelStep 产生了哪些模型输出 |
 | Tool Registry / Tool Wrapper | 能力可见性、绑定、权限、工具结果提交 | 哪一次合法工具调用取得并保存了什么 |
-| Business Port / Adapter | 与实际检索、目录、来源服务通信 | 本次业务请求取得怎样的结构化返回 |
-| DurableEventStreams | 持久事件查询、游标与 SSE 传输 | 外部能够按顺序观察哪些已提交变化 |
+| Business Port / Adapter（业务接口契约 / 适配实现） | 将统一请求映射到检索、目录与来源服务 | 本次业务请求取得什么结构化返回 |
+| DurableEventStreams（持久事件输出器） | 持久事件查询、游标与 SSE 传输 | 外部能够按顺序观察哪些已提交变化 |
 
-其中 **Provider（模型提供方适配器）**将 SDK Model 请求转换为具体模型网络调用；真正的模型服务在这条边界之外。与它相似，业务 Adapter 将稳定能力转换为不同上游接口的实际请求。两者都可以在不改变整个 Harness 公开 API 的前提下，按明确契约替换实现。
+Provider 将 SDK 的模型请求转换为网络请求。业务 Adapter 将统一工具参数转换为上游接口请求。两者都通过明确契约连接外部服务。更新实现时，需保持公开接口的兼容性。
 
 ### 为什么在 SDK 外面仍要有 RunnerFacade？
 
-SDK 的 `runner.run()` 知道如何推进工具循环，却不天然知道当前产品 Run 在哪个 Thread 下、数据库租约是否还有效、用户是否已经持久取消、历史内容应如何提交。门面在 SDK 前后建立这些条件，并把模型、工具、Session 接入统一存储。
+SDK 的 `runner.run()` 推进模型与工具循环。RunnerFacade 提供 Thread/Run 身份、有效租约、取消信号和持久存储。它在运行前装配依赖，并在运行结束后提交终态。
 
-这一层让 SDK 继续负责它擅长的模型与工具机制，而产品自己负责用户可感知的生命周期。具体错误定位也更直接：一次模型网络失败属于模型边界，一次结果存储失败属于执行持久化边界，当前授权被撤回属于本地策略边界。
+SDK 负责工具循环。Harness 负责用户任务的生命周期。模型网络错误、数据库写入失败和权限变化分别由相应边界处理。
 
-### Continuation Decision（是否继续执行）究竟位于哪里？
+### Continuation Decision（继续执行判定）在什么位置？
 
-当模型返回工具调用时，SDK Runner 将工具结果加入后续输入并继续循环；模型输出最终答复时，SDK 按其执行协议结束。当前工程把“调用哪个工具、怎样改写查询、是否补充检索”的选择交给模型与 SDK。Harness 保留预算、当前授权、取消、输出校验和运行终态约束。
+Continuation Decision 指系统判断是否继续调用模型或工具。模型返回工具意图时，SDK 执行工具并继续循环。模型返回最终内容时，SDK 结束当前循环。Harness 在每次动作前检查预算、权限和取消状态。
 
-所以在这个架构中，产品没有额外建立一套与 SDK 重复的独立 Agent Loop。确实需要跨任务调度、跨 Agent 目标分派或新的策略约束时，再明确新增决策层的输入、状态和权限。
+本工程复用 SDK 的 Agent Loop。未来若增加跨任务或跨 Agent 调度，应为新控制层定义独立的状态和权限。
 
 ### 模型输出为什么不能直接作为公开事件？
 
-模型流式增量属于 SDK/Provider 的协议。Harness 还需要表述 Run 的受理、队列领取、工具执行、来源引用、取消和最终提交等产品事实。事件层通过稳定的 RuntimeEvent Schema 表达这些变化。
+SDK 产生模型流式增量。Harness 还要记录请求受理、工具执行、取消和运行终态。RuntimeEvent Schema（运行事件结构约束）统一表示这些产品变化。
 
-对外协议因此能够独立于模型供应商的内部字段演进。应用可以根据 `threadId/seq` 读取和续传事件，实际 SDK 会话和存储细节则由服务端控制。
+外部按 `threadId` 与 `seq` 读取事件。内部模型协议变化时，Harness 可以保持稳定的事件契约。
 
 ## 17｜为什么工程选择这样的技术架构？
 
-在真正的系统里，技术选型通常从具体需求倒推，而不是从流行组件清单开始。
+以下技术选择分别解决受理、执行、存储和维护问题。
 
 ### TypeScript、Node.js 与 Fastify
 
-在线 Runtime 用 TypeScript，便于与 Agents SDK 的模型、工具和 Session 类型结合，也便于在同一个运行环境里维护 HTTP 契约和业务适配。Node.js 适合处理大量异步 I/O：模型网络请求、业务接口和数据库查询。
+TypeScript 提供静态类型检查。它帮助开发者维护模型、工具、Session 和 HTTP 的数据契约。Node.js 处理模型网络请求、业务接口和数据库等异步 I/O（输入输出操作）。
 
-Fastify 提供路由、生命周期和请求校验；产品进一步用 Zod / JSON Schema 固定真实输入输出结构，并用路由清单检查实际注册操作是否与公开 OpenAPI 一致。**编译期类型与运行期校验是互补关系**：TypeScript 能约束本地代码，HTTP 和模型返回仍需实际解析。
+Fastify 处理 HTTP 路由和请求生命周期。Zod 与 JSON Schema（JSON 数据结构规范）约束运行时数据。OpenAPI（HTTP 接口规范文档）描述公开操作。项目检查已注册路由与 OpenAPI 是否一致。TypeScript 负责编译期检查，外部输入仍由运行时 Schema 校验。
 
 ### OpenAI Agents SDK 与单 Agent 执行
 
 当前源码锁定 `@openai/agents@0.18.0`。SDK 已有 Agent、Runner、Model、Session 和 Function Tool 机制，产品把开发工作集中在运行治理、状态、工具契约和业务连接上。
 
-单 Agent 也可以使用多个工具完成复杂问题：检索来源、读取产品目录、查询结构化事实、补充原始 PDF。选择一个 Agent 承担当前 Run，可以先把身份和状态所有权建立清楚；需要更复杂的任务委派时，再定义跨 Agent 的调度与上下文边界。
+单个 Agent 可以调用多个工具，例如检索、目录和结构化事实查询。每个 Run 由一个 Agent 执行，身份与状态所有权明确。增加多 Agent 协作时，需要另行设计任务委派和上下文边界。
 
 ### PostgreSQL 与 pg-boss
 
-数据库保存 Thread、Turn、Run、ModelStep、ToolInvocation、Canonical Items、检查点和持久事件。pg-boss 使用 PostgreSQL 提供任务交付，使受理事务能同时保存 Run、事件和 Job。
+PostgreSQL 保存运行实体、Canonical Items（权威运行条目）、检查点和事件。pg-boss 使用同一数据库管理 Job。受理事务可以同时提交 Run、事件和队列任务。
 
-这个选择带来的实际保证是：请求提交成功后，有一份可以由 Worker 后续领取的持久任务。队列交付不直接等于执行资格，产品仍使用 `claimRun`、Lease 和 Fence 管理后续写入。
+请求提交后，Worker 可以领取已保存的 Job。`claimRun` 验证当前状态和 Lease（执行租约）。Fence（租约代次）阻止失去资格的 Worker 继续写入。
 
 ### RunSnapshot、Registry 与 Port/Adapter
 
-RunSnapshot 记录模型、工具集合和策略的具体身份；Registry 管工具规格、Profile、后端绑定和当前授权；Port/Adapter 把稳定能力连接到真实业务系统。
+RunSnapshot 保存本次模型、工具集合和策略身份。Registry 管理工具规格、Profile 和执行授权。Port（业务接口契约）规定输入输出。Adapter（业务适配器）将统一请求转换为上游调用。
 
-它们支撑业务能力可替换，同时让旧 Run 可以解释自己当时采用的版本。仅靠工具名字相同，不足以保证新旧后端在字段、数据版本、分页和授权上的语义完全兼容。
+这些结构记录运行采用的能力版本。更换后端时，需要检查字段、数据版本、分页和授权是否兼容。
 
 ### 独立 ModelStep/ToolInvocation 与权威事实
 
-模型返回工具调用意图以后，工具执行可能仍在进行，甚至多个工具并发完成。分别记录模型步骤与工具执行实例，可以在真实故障中定位谁产生了什么、耗时在哪里、结果是否已持久提交。
+模型返回工具调用意图以后，工具执行可能仍在进行，甚至多个工具并发完成。独立的步骤和工具记录帮助定位执行时间、错误位置和结果提交状态。
 
-产品保存一组权威运行条目，Session 从中维护有序引用，`finalContentRef` 复用最终内容身份，事件则投影已提交的状态变化。这样模型继续、历史查询和外部观察可以共享同一套事实基础。
+产品保存权威运行条目。Session 按顺序引用这些条目。`finalContentRef` 复用最终助手条目的 ID。事件输出已提交的状态变化。这样模型继续、历史查询和外部观察可以共享同一套事实基础。
 
 ### 这些选择带来了什么成本？
 
-使用持久事务与分层边界，意味着更多数据库操作与版本管理；工具结果先提交再继续，可能增加一点请求延迟；事件续传需要处理游标和保留窗口；后端变化需要兼容性验证。
+持久事务增加数据库操作。工具结果先提交可能增加响应延迟。事件续传需要管理游标和保留窗口。后端升级需要兼容性验证。
 
-这些开销与我们要解决的实际问题直接相关：任务要能持续执行，工具结果要能追溯，用户控制要能跨进程生效，程序重启后要能恢复一致状态。后续可以根据负载调整进程部署和优化查询，但这些产品语义值得在第一版就明确。
+这些成本换来持久任务、可追溯结果和跨进程控制能力。系统重启后也能依据已保存事实进行恢复。后续可以按实际负载优化部署和查询。
 
 ## 18｜实际动手：怎样验证一条从请求入口到运行事件的链路？
 
-到这里，概念与代码关系已经完整，可以把它们压缩到一个可观察的小任务：**提交一条合成知识查询，让 Harness 接受、执行并产出事件**。随后再运行会触发工具调用的受控模型，证明中间的 ModelStep 与 ToolInvocation 关系也确实成立。
+下面用两个实验验证运行链。第一个实验提交合成请求，检查 Run 和 Events。第二个实验使用脚本化模型，检查 ModelStep、ToolInvocation 和 ToolResult 的关系。
 
-这里使用两个层次的测试，目的各自明确。
+两项测试分别检查服务生命周期和工具循环。
 
 ### 先跑基础服务生命周期
 
-需要一个已经启动、拥有本地受控测试凭证的合成 Runtime。仓库根目录 `package.json` 提供 `runtime:start`；启动所需的数据库与 HTTP 私有配置，通过前述环境变量引用传入。
+启动一个已配置凭证的本地合成 Runtime。`package.json` 提供 `runtime:start` 脚本。数据库和 HTTP 配置由私有文件提供。
 
 先检查 `GET /health/ready`。这个接口会检查部分组件状态，例如数据库和队列可用情况。得到健康结果后，创建 Thread，再提交 Turn。
 
-下面的 shell 命令针对一个**已经存在的本地受控实例**。`HARNESS_TEST_TOKEN` 需要由操作者在自己的终端设置；命令文本不包含真实凭证。
+下面使用 curl（命令行 HTTP 客户端）访问本地测试实例。先在终端设置 `HARNESS_TEST_TOKEN`。
 
 ```bash
 BASE_URL="http://127.0.0.1:3100"
@@ -1378,7 +1361,7 @@ curl --fail-with-body --silent --show-error \
   }'
 ```
 
-`synthetic-profile` 是项目控制面合成测试使用的配置名称。实际实例是否启用该配置取决于服务端 Profile 与当前授权；命令应根据当前 `GET /v1/tools` 与可用配置进行确认。
+`synthetic-profile` 是项目控制面合成测试使用的配置名称。使用前应确认服务端加载了对应 `agentProfileId`，且当前主体拥有调用权限。`GET /v1/tools` 只能列出工具状态。
 
 返回的 `runId` 可以用于查询执行状态：
 
@@ -1389,7 +1372,7 @@ curl --fail-with-body --silent --show-error \
   "$BASE_URL/v1/runs/$RUN_ID"
 ```
 
-如果立刻查询，Run 可能仍处于 `queued` 或 `running`。之后再次查询，可以读到已经提交的终态。完成状态的判断来自实际数据库和 API 读回，而不是假定 HTTP 返回 `202` 时模型已经完成。
+提交后立即查询，Run 可能仍处于 `queued` 或 `running`。执行完成后，接口返回持久终态。`202` 只代表受理成功。
 
 ### 事件输出究竟长什么样？
 
@@ -1402,7 +1385,7 @@ curl --no-buffer --silent --show-error \
   "$BASE_URL/v1/threads/$THREAD_ID/events?after=0"
 ```
 
-`--no-buffer` 让终端尽快打印接收到的文本帧。SSE 连接可能一直保持打开，用 `Ctrl+C` 可以结束当前终端的**观察连接**；后台 Run 的取消应该通过专门的运行控制接口表达。
+`--no-buffer` 让 curl 及时打印收到的事件。按 `Ctrl+C` 可以关闭观察连接。取消后台 Run 需要调用专门的控制接口。
 
 <details open>
 <summary><strong>实践窗口 A｜默认合成运行的可验证结果</strong></summary>
@@ -1424,15 +1407,15 @@ curl --no-buffer --silent --show-error \
 | Final | `finalContentRef` 指向已提交助手条目 | 内容完成持久化 |
 | Events | 能按 `seq` 读取运行变化 | 服务端事件出口可用 |
 
-上表是从当前源码和既有测试得出的预期。实际调用的时间戳、ID 与最终事件序号由运行实例产生，读者应以自己取得的值为准。
+上表列出合成模式的预期。实际 ID、时间和事件序号以运行时读回为准。
 
 </details>
 
 ### 再跑真正的 SDK 工具调用循环
 
-要经过工具路径，工程使用 `tests/runner/runner.test.ts` 里的受控 `ScriptedModel`。它第一次输出 `function_call`，第二次返回固定答案 `synthetic answer`。虽然模型与业务数据是合成的，但测试使用真实的 PostgreSQL 存储、RunnerFacade、SDK 工具执行和会话适配器。
+`tests/runner/runner.test.ts` 使用 ScriptedModel（脚本化模型替身）。它第一次返回 `function_call`，第二次返回 `synthetic answer`。测试使用真实 PostgreSQL、RunnerFacade、SDK 工具和 Session。模型输出与业务结果由测试夹具提供。
 
-以下是**真实测试中存在的核心调用与断言**，去掉了夹具的创建代码：
+测试中的核心调用与断言如下。夹具负责创建 Run、模型和工具绑定：
 
 ```ts
 const model = new ScriptedModel([
@@ -1454,7 +1437,7 @@ expect(invocations).toHaveLength(1);
 expect(invocations[0]?.modelStepId).toBe(steps[0]?.stepId);
 ```
 
-其余断言还核对最终内容引用、助手条目状态、SDK Session 中的工具结果，以及实际存储事件最后是否到达 `run.completed`。这是 SDK 执行与产品事实已经打通的有力证明：**两次模型步骤、一次工具执行、一个已提交的最终答案**。
+测试还检查最终引用、助手条目、Session 历史和 `run.completed` 事件。这条受控链包含**两次模型调用和一次工具执行**，并提交了最终内容。
 
 <details>
 <summary><strong>实践窗口 B｜按真实断言重建的完整执行轨迹</strong></summary>
@@ -1485,13 +1468,13 @@ expect(invocations[0]?.modelStepId).toBe(steps[0]?.stepId);
 [Events]       turn.completed / run.completed
 ```
 
-这是**依据真实测试结构重新排版的教学轨迹**，字母 ID 是阅读用符号，并非从生产终端复制的 UUID。测试中的受控模型输出和合成工具返回被明确隔离于真实保险业务。
+轨迹按测试中实际存在的断言重建。字母 ID 是示意标识。模型输出和工具结果使用合成数据。
 
 </details>
 
 ### 再观察一次重复提交
 
-网络请求可能在接收 `202` 之后丢失响应。把同一个 `Idempotency-Key`、同一个 Thread 和同样正文再次提交，系统应返回**原来的受理身份**。只有使用新的命令身份，才可能产生新的 Turn；当前 Thread 如果已有活动 Run，其他命令还需遵守 `THREAD_BUSY` 约束。
+HTTP 响应可能丢失。调用方使用相同的幂等键和正文重试时，应得到相同 Run ID。新命令可以创建新 Turn，但活动 Thread 仍受 `THREAD_BUSY` 约束。
 
 <details>
 <summary><strong>实践窗口 C｜四种请求与期望状态</strong></summary>
@@ -1503,7 +1486,7 @@ expect(invocations[0]?.modelStepId).toBe(steps[0]?.stepId);
 | 同键、不同正文 | `409 IDEMPOTENCY_CONFLICT` | 保留原命令身份 |
 | 新命令争用活动 Thread | `409 THREAD_BUSY` | 一个 Thread 仍只有一个活动 Run |
 
-`tests/control/http.test.ts` 通过真实 PostgreSQL 和 HTTP 测试验证这类条件，还会读取实际 pg-boss Job 与 RunSnapshot。它们说明的是**请求控制面的确定性行为**，与模型内容生成质量属于不同测试范围。
+`tests/control/http.test.ts` 通过真实 PostgreSQL 和 HTTP 测试验证这类条件，还会读取实际 pg-boss Job 与 RunSnapshot。这些测试验证控制面的确定性行为。模型生成质量需要单独评测。
 
 </details>
 
@@ -1524,15 +1507,15 @@ INSURANCE_STORAGE_TEST_CONFIG=/absolute/private/test-db.json \
   corepack pnpm test:control
 ```
 
-`test:runner` 会检查数据库连接配置是否存在，然后运行 Runner 集成测试。该路径应指向用户有权限的隔离测试资源，并且与正式产品数据隔离。
+`test:runner` 先检查数据库测试配置，然后运行 Runner 测试。连接配置应指向独立测试数据库。
 
-项目历史的 `docs/implementation/runner-preparation.md` 保存过 13 项真实 PostgreSQL + SDK 合成模型纵向验收，包括两次 ModelStep、一次 ToolInvocation、Session 关联、取消、结果提交失败与工具并发等。它的测试结论绑定当时的源码与执行条件。本文没有把以上示意命令称为本轮重新运行的结果。
+历史工程记录 `runner-preparation.md` 包含 13 项 PostgreSQL + SDK 纵向测试。测试覆盖工具循环、Session、取消、结果提交失败和并发。结论对应当时的源码和测试环境。
 
-### 三次读回，定位同一条任务的不同事实
+### 从三处读回同一条 Run 的执行事实
 
-完整实践还需要练习沿一条 `runId` 检查三个位置。首先，通过授权的 `GET /v1/runs/{runId}` 读取当前运行状态；然后，用隔离测试数据库核对模型步骤、工具执行与最终内容引用；最后，从 `GET /v1/threads/{threadId}/events?after=...` 读取持久事件流。
+使用同一个 `runId` 读取三处数据。先通过 HTTP 查询 Run 状态，再查询数据库中的模型、工具和最终内容。最后，通过 SSE 读取持久事件。
 
-数据库读取可以采用下面的参数化查询，`$1` 需要绑定实际运行 ID。它们只适用于当前授权的隔离测试库：
+下面的 SQL（关系数据库查询语言）使用参数 `$1` 绑定实际 Run ID。只在已授权的隔离测试数据库执行：
 
 ```sql
 SELECT r.id, r.status, r.model_calls, r.tool_calls,
@@ -1552,7 +1535,7 @@ WHERE run_id = $1
 ORDER BY started_at, id;
 ```
 
-对单工具案例，预期为两个模型步骤和一条工具执行记录。工具的 `model_step_id` 指向提出调用意图的模型步骤，结果引用指向已保存的条目，而最终内容引用指向最后的助手条目。要证明第二次模型调用真正消费了 ToolResult，还需要检查 SDK Session 或模型输入，而不仅仅检查数据库行数。
+单工具案例包含两次 ModelStep 和一次 ToolInvocation。工具的 `model_step_id` 指向首个模型步骤，结果引用指向已保存条目。最终引用指向助手条目。验证第二次模型输入时，还需检查 Session 或受控 ModelRequest。
 
 <details>
 <summary><strong>从现象回到执行边界</strong></summary>
@@ -1564,13 +1547,13 @@ ORDER BY started_at, id;
 | 工具有返回却没有后续模型调用 | 工具 Schema、结果提交、Session、取消状态 |
 | Run 已结束但观察者缺少事件 | 持久 `seq`、SSE 游标、权限与保留窗口 |
 
-第一种情况发生在模型执行之前；第二种情况还要区分“模型直接回答”和“模型提出调用但工具准入失败”；第三种情况要检查 ToolResult 是否已成为持久事实；第四种情况要区分服务端的 Run 生命周期与观察者的连接生命周期。沿着这些边界排查，能够把抽象的“Agent 没有完成任务”翻译成具体的代码和测试问题。
+第一种问题发生在模型执行前。第二种要核对模型是否真正提出工具调用。第三种要检查工具结果是否已经提交。第四种要检查运行事件和观察连接的状态。每种情况都能定位到具体代码和测试。
 
 </details>
 
 ### 从测试里提取最重要的五条不变量
 
-Invariant（不变量）就是系统无论怎样调度，都必须保持的规则。对第一篇来说，至少理解这些：
+Invariant（不变量）是所有合法执行都必须满足的规则。当前案例检查五项关系：
 
 1. 一次被接受的命令有稳定身份，合法的幂等重放保留原 Turn / Run。
 2. 写入运行状态需要当前有效的执行租约和授权条件。
@@ -1578,15 +1561,15 @@ Invariant（不变量）就是系统无论怎样调度，都必须保持的规�
 4. ToolResult 必须在 SDK 消费它并继续调用模型之前完成持久化提交。
 5. 最终 `finalContentRef` 只能指向合法的已提交助手内容，最终状态与事件以相应事务为准。
 
-测试应同时检查数据库事实、SDK 模型输入和 HTTP 事件读取。只对最终助手文字做字符串比较，无法证明以上全部关系。
+测试应检查数据库、SDK 输入和 HTTP 事件。最终回答的字符串比较只验证文本内容。
 
-最后可以把这条路径当作排障地图：收到 `409` 看控制面状态和命令身份；模型调用未出现看 Worker/claim 和 ModelStep；工具结果缺失看 Invocation 与存储；最终内容不一致看 `finalContentRef` 和 Session；外部进度丢失看 `events` 游标与读取。
+排障时可沿执行链定位。收到 `409`，先看控制面状态。缺少模型步骤时，检查 Worker 和租约。缺少工具结果时，检查 Invocation 与持久化。最终内容异常时，检查 `finalContentRef` 和 Session。缺少事件时，检查游标与事件读取。
 
 ## 19｜重新理解一句用户请求背后的软件系统
 
-回到文章开头：“查询示例保障甲的等待期，并给出原文依据。”
+用户最初的问题是：“查询示例保障甲的等待期，并给出原文依据。”
 
-现在我们已经知道它进入系统之后的完整结构：
+这个问题经过下列执行链：
 
 ```text
 用户输入
@@ -1605,11 +1588,11 @@ Invariant（不变量）就是系统无论怎样调度，都必须保持的规�
   → HTTP / SSE 对外输出
 ```
 
-这里包含了模型的智能选择，也包含了系统的工程约束。模型提出查询意图，SDK 驱动循环，Harness 管理合法执行、状态与事实，业务后端提供证据，事件把已发生的变化稳定表达出来。
+模型选择下一步动作。SDK 驱动循环，Harness 管理权限、状态和持久化。业务后端提供证据，Events 对外输出已提交变化。
 
-当读者第一次接触 Harness 时，最重要的不是立即记住所有设计模式，而是建立一种足够具体的理解：**每个抽象概念都有一个实际对象，每个对象都有自己的数据形状，每次动作都有可追溯的输入与输出。**
+**每个运行概念都对应实际对象。** 每个对象拥有明确字段、输入和输出。开发者可以根据这些对象追踪完整执行过程。
 
-之后再遇到“支持恢复”“工具注册”“事件重放”“会话上下文”这些设计问题，就能回到这条执行链，明确它属于哪个边界、应该修改哪类代码、又应该写什么测试。
+设计恢复、工具注册、事件重放或会话历史时，可先确定其所属执行边界。然后定位源码、状态和测试。
 
 下一篇继续深入这些对象的合同与可验证性：[让 Agent 的行为可以被验证：契约、运行实体与证据标尺](02-contracts-and-runtime-facts.md)。
 
