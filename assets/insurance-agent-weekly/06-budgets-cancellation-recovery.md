@@ -1,164 +1,470 @@
 # 让自主执行保持有界：预算、取消与检查点恢复
 
-一个条款查询 Agent 已经取得产品定义，正在补查适用条件。用户此时取消任务，模型却恰好返回最后一段文本。系统需要决定：哪一种运行状态已经成立，哪些内容可以保留，以及外部调用方接下来会读到什么。
+## 01｜查询尚未完成，系统为什么需要停止？
 
-另一种情况更隐蔽：业务工具已经完成读取，进程却在结果保存前退出。重启后的程序能够找到用户问题和工具调用记录，却无法找到工具结果。继续执行之前，它必须先认识这个信息缺口。
+> 比较几款示例产品的等待期、免责条件和原文出处。
 
-这些都是 Harness（智能体执行控制系统）的日常工作。自主查询需要资源预算，外部控制需要持久状态，中断后的继续需要可验证的起点。本篇结合 Insurance Agent Runtime 的实际实现，讨论这些机制怎样共同工作。
+Agent 已经查到部分资料，还准备继续搜索。此时可能发生四件事：工具次数达到上限、一个来源接口长期无响应、用户要求停止，或承载运行的进程退出。
 
-## 一次执行需要多种资源标尺
+这些情况都要求 Run（执行尝试）结束，但不一定表示用户问题已完整解决。Harness（智能体执行控制系统）需要保存已取得的证据，停止后续动作，并说明下一次可以从什么位置继续。
 
-“最多运行十步”需要进一步解释：指十次模型请求、十次工具调用，还是 SDK 内部的十轮循环？在真实程序中，这些计数并不相同。
+运行控制的目标不是让模型永远执行，而是让每次动作都处于明确的资源和状态边界内。
 
-RunBudget（运行预算）把限制分别交给相应执行位置。`RunnerFacade` 从 RunSnapshot（运行配置快照）解析预算，模型包装器和工具执行器再使用它们。[^budget]
+```text
+自主动作选择
+  + 可用工具和权限
+  + 调用与时间预算
+  + 持久执行事实
+  + 明确终态和恢复位置
+  = 可管理的 Agent 运行
+```
 
-| 参数 | 约束对象 | 所在边界 |
+本文沿实际代码解释这些边界。业务问题使用合成产品，源码细节绑定文末快照。
+
+## 02｜运行预算具体限制什么？
+
+RunBudget（运行预算）是一组不同单位的限制。只说“最多十步”不够，因为用户回合、SDK 循环、模型请求和工具调用不是同一个计数。
+
+| 参数 | 约束对象 | 本快照的默认值 |
 | --- | --- | --- |
-| `maxSdkTurns` | SDK 内部循环上限 | SDK Runner |
-| `maxModelCalls` | 当前 Run 的模型调用尝试 | `RecordedModel.begin` |
-| `maxToolCalls` | 当前 Run 的工具动作数量 | 工具执行包装器 |
-| `maxConcurrentTools` | 同时执行的工具数量 | SDK 工具调度 |
-| `maxElapsedMs` | 当前 Run 的经过时间 | 运行门面 |
-| `maxToolResultBytes` | 一次工具结果的体积 | 工具结果校验 |
+| `maxSdkTurns` | SDK 循环次数 | 12 |
+| `maxModelCalls` | 当前 Run 的模型调用尝试 | 采用明确值，否则继承 maxTurns，默认12 |
+| `maxToolCalls` | 工具调用预留次数 | 6 |
+| `maxConcurrentTools` | 同时执行的工具 | 4 |
+| `maxElapsedMs` | 当前 Run 经过时间 | 120000 毫秒 |
+| `maxToolResultBytes` | 单次工具结果大小 | 200000 字节 |
 
-模型上下文还有历史字节、证据字节和完整请求字节限制。它们控制传入模型的数据规模；模型输出的 token（分词单位）上限则采用另一种计量方式。两种单位各自有用，不能直接按固定比例换算。
+这些值来自 `budgetFor()`，是该工程版本的配置，不是通用生产建议。解析器还限制允许范围，例如 Run 总时限最高为900000毫秒。[^budget]
 
-当前工程快照的默认 Run 时限为 120 秒，配置解析上限为 900 秒。这些数字描述的是此版本的实现选择。其他产品应根据工具耗时、允许调用次数和恢复方式确定自己的预算，而不是单独把时限调大。[^budget]
+上下文另有历史、证据和完整请求的字节预算。模型输出 `maxTokens` 则采用 token（模型分词单位）。字节、字符和 token 应分别记录。
 
-## 预算检查要靠近实际动作
+预算还需要定义作用域。当前参数主要约束一个 Run。重试创建新 Run，整体 Turn 的累计成本需要另行汇总。不能把一次尝试的限制自动解释为整段对话的总费用上限。
 
-模型预算在调用前检查，工具预算在创建执行实例前预留。这样，一次模型响应即使提出多个动作，也需要分别经过共享限制。
+## 03｜预算怎样进入当前运行？
+
+控制面受理时保存 RunSnapshot（运行配置快照）。它确定本次模型、工具集合和策略身份。Worker 领取 Run 后，RunnerFacade（运行门面）从快照解析预算，并放入 RunEnvironment（本地执行环境）。
 
 ```ts
-// 摘编自工具执行包装器：先预留，再记录执行实例。
-if (++reserved > environment.budget.maxToolCalls) {
-  throw new RunBoundaryError('TOOL_BUDGET_EXHAUSTED');
-}
+// facade.ts 中 budgetFor 的主要逻辑摘编。
+const config = claimed.snapshot.modelConfig;
+const toolset = claimed.snapshot.toolset;
+const budget = budgets.parse({
+  maxSdkTurns: config.maxTurns ?? 12,
+  maxModelCalls: config.maxModelCalls ?? config.maxTurns ?? 12,
+  maxToolCalls: toolset.maxToolCalls ?? 6,
+  maxConcurrentTools: toolset.maxConcurrentTools ?? 4,
+  maxElapsedMs: config.maxElapsedMs ?? 120_000,
+  maxToolResultBytes: toolset.maxToolResultBytes ?? 200_000,
+});
+```
 
+`budgets.parse()` 是运行时 Schema（数据结构校验），它拒绝非法范围和类型。设置参数不应只依赖 TypeScript 编译检查，因为配置也可能来自外部文件或管理入口。
+
+快照保存配置，执行器保存当前计数。模型包装器记录已开始的 ModelStep（模型调用步骤），工具包装器记录已预留的动作。持久用量与预算计数有各自用途：一个记录事实，一个决定后续是否准入。
+
+调用次数也不天然等于供应商账单请求数。步骤可能在网络发送前建立，传输层也可能重试。严格计量应结合实际用量与请求记录。
+
+## 04｜多个工具同时出现时，怎样共享预算？
+
+模型一次响应可以提出多个 ToolCall（工具调用意图）。SDK 按并发上限调度工具，但总量仍由共享预算约束。
+
+工具包装器在准备执行时预留次数：
+
+```ts
+// createRunTools 中的调用预算边界。
+if (++reserved > environment.budget.maxToolCalls) {
+  throw new RunBoundaryError("TOOL_BUDGET_EXHAUSTED");
+}
 await environment.storage.startInvocation(
   environment.lease,
   invocationInput,
 );
 ```
 
-这里的 `reserved` 是当前 Run 执行器持有的计数。工具总量与同时执行数量也分别管理：允许六次调用、最多两个并发，意味着调度器可以分批推进六个动作。
+这段代码发生在真实动作入口，而不是只在最初提示词里告诉模型“最多查六次”。模型遵守提示有助于效率，但服务端仍必须自己检查。
 
-重试或恢复会创建新的 Run。因此，每次尝试的预算与整个用户任务的累计成本是两个层次。需要跨尝试费用上限的产品，应在 Turn（用户回合）或更高层增加持久预算账户。仅统计当前 Run，得到的是当前尝试的资源情况。
-
-模型调用计数还有一个观察边界：ModelStep（模型调用步骤）会在请求发送前持久化。发送前失败可能留下步骤；底层客户端自动重试则可能增加网络请求。所以严格的用量核对需要将传输记录与 ModelStep 对照，不能只依赖一个计数。
-
-## 取消命令先写入数据库
-
-取消同时涉及外部意图和本地执行。API 保存 `cancel_requested`，表示用户已经正式要求停止当前 Run；Worker 或心跳观察到它，再触发 AbortController（本地取消控制器）。[^cancel]
+总次数与并发数可以分别设置。例如最多6次调用、最多2个并发，表示六个动作可以分批执行。并发上限只影响同时运行数量，不增加总调用额度。
 
 ```text
-取消请求受理
-  → 持久状态：cancel_requested
-  → 执行器观察到新状态
-  → 取消信号传递到模型和工具
-  → 运行收尾
-  → 持久状态：cancelled
+maxToolCalls = 3
+maxConcurrentTools = 2
+
+时刻1：工具A、工具B同时执行
+时刻2：工具C执行
+时刻3：新的工具D被预算拒绝
 ```
 
-这两个状态对应不同的完成条件。请求已受理，并不意味着所有远端处理都在同一时刻结束。某个外部服务可能已经完成了读取，某个底层操作也可能需要一段时间才能响应信号。
+这是调度示意，实际开始顺序由 SDK 和调用列表决定。拒绝第四个动作时，前三个已开始动作仍需按各自状态收尾。
 
-持久状态保证控制命令能够跨进程被观察，本地信号负责让当前等待尽快收尾。工程的心跳逻辑既续租，也读取 Run 是否处于 `cancel_requested`；即使取消命令来自另一个请求处理路径，执行器仍能看见它。
+## 05｜Deadline、Timeout 和 Lease 有什么区别？
 
-工具调用还组合了 Run 信号和工具自身的期限信号。结果返回后再次检查信号，可以防止过期结果自然推进下一次模型调用。这里的严格边界是“后续动作是否准入”和“结果是否允许提交”；远端操作的物理停止时间仍取决于它自身的协议。
+Deadline（截止时间）是某个操作应停止的绝对或相对边界。Timeout（超时限制）是等待时长。Lease（执行租约）限定当前 Worker 的写入资格。
 
-## 取消与完成需要共享一个裁决点
+| 时间参数 | 主要问题 |
+| --- | --- |
+| Run 总时限 | 这次执行最多持续多久？ |
+| 工具时限 | 某个外部动作最多等待多久？ |
+| 模型或网络时限 | 一次请求多久应报告超时？ |
+| Lease 有效期 | 当前执行者现在还有写入权吗？ |
+| HTTP 观察超时 | 调用方愿意等这次读取多久？ |
 
-如果程序只在内存中读取一次取消信号，然后提交成功，检查与提交之间仍有竞争窗口。取消事务可能正好在这个窗口内成立。
+这些时间可以同时存在。观察者等待30秒后离开，不应自然终止一个预算为120秒的后台 Run。工具超时也不必改变其他已提交工具结果的事实。
 
-因此，`RuntimeStorage.finishModelStep()` 在与 Run 状态相同的数据库锁下检查：当 Run 已处于 `cancel_requested` 时，新的模型成功提交会被拒绝。运行门面在最终提交前也再次读取取消状态。[^cancel]
+```mermaid
+sequenceDiagram
+  participant C as 观察者
+  participant R as Run
+  participant T as 工具
+  participant D as 存储
+  R->>D: 取得租约
+  R->>T: 调用并传入工具期限
+  C->>R: 观察30秒
+  R->>D: 心跳续租
+  C-->>C: 观察超时，关闭连接
+  T-->>R: 返回或超时
+  R->>D: 按Run预算和状态收尾
+```
+
+本地时间使用 `performance.now()` 衡量经过时长，可以避免墙上时钟调整影响计时。数据库租约有效性由数据库时钟判断。两种时钟服务不同目的。
+
+## 06｜AbortController 和 AbortSignal 怎样传播取消？
+
+AbortController（取消控制器）产生 AbortSignal（取消信号）。异步操作读取这个信号，尽快停止等待或拒绝后续动作。
+
+```js
+// Node.js 可独立运行的教学示例。
+function abortableDelay(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const finish = () => {
+      signal.removeEventListener("abort", abort);
+      resolve("done");
+    };
+    const timer = setTimeout(finish, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+async function demo() {
+  const controller = new AbortController();
+  const pending = abortableDelay(1000, controller.signal);
+  controller.abort(new Error("USER_CANCELLED"));
+  try {
+    await pending;
+    throw new Error("EXPECTED_ABORT");
+  } catch (error) {
+    if (error.message !== "USER_CANCELLED") throw error;
+    console.log("取消信号已传播，定时器已清理");
+  }
+}
+demo().catch(error => { console.error(error.message); process.exitCode = 1; });
+```
+
+这段程序演示协作式取消：代码需要监听或检查信号。信号不会自动撤销一个远端已经完成的操作。
+
+工具包装器组合 Run 信号和 SDK 工具信号，Registry（工具注册执行层）还组合工具期限。调用前后检查信号，可以阻止超时结果继续进入模型循环。[^tools]
+
+如果远端请求已经开始，它可能仍在远端执行。系统应把“停止等待”“不再接受结果”和“远端动作被撤回”分开表达。
+
+## 07｜取消请求怎样从 HTTP 到达 Worker？
+
+取消首先是一项控制命令。API 保存 `cancel_requested`，表示用户的停止意图已经正式受理。执行器再通过本地快速通知或心跳读取该状态。
+
+```text
+取消 API
+  → 数据库：cancel_requested
+  → Worker / RunnerFacade 观察到状态
+  → AbortController.abort()
+  → 模型与工具响应信号
+  → 数据库：cancelled
+```
+
+`cancel_requested` 与 `cancelled` 之间可能存在时间差。前者是请求成立，后者是执行收尾确认。
+
+RunnerFacade 的心跳会续租并读取持久 Run。如果发现取消请求，就触发本地信号。这样，取消即使来自另一个进程，也能被当前执行器观察。
+
+尚未启动的 queued Run 可以通过 `settleUnclaimedRun()` 确认未执行并结束。已经取得租约的运行则走执行器的取消路径，避免把“尚未调用”和“正在执行”混为一谈。
+
+<details>
+<summary><strong>展开：为什么观察连接不拥有取消信号？</strong></summary>
+
+SSE 或轮询是读取进度的通道。关闭通道只结束该观察者。Run 的取消由持久控制命令决定。
+
+一个用户可以在多个终端观察同一 Run。某个终端退出，不应使其他观察者的任务突然结束。
+
+</details>
+
+## 08｜取消和成功同时到达时，谁决定结果？
+
+模型即将返回时，用户可能已经提交取消。如果只检查内存信号，检查之后到事务提交前仍有竞争窗口。
+
+存储因此在与 Run 相同的锁内检查取消状态。`finishModelStep()` 对已请求取消的 Run 拒绝新的成功模型提交：
 
 ```ts
-// 存储层的关键条件，位于持有运行状态锁的事务中。
-if (input.status === 'completed' && run.status === 'cancel_requested') {
-  throw new StorageError('CANCEL_REQUESTED');
+if (input.status === "completed" && run.status === "cancel_requested") {
+  throw new StorageError("CANCEL_REQUESTED");
 }
 ```
 
-已经提交的工具结果仍是发生过的事实。取消不会让一次已完成业务读取从历史中消失。系统需要分别保存最终任务状态、已取得内容和实际用量。
+RunnerFacade 最终提交前还会读取取消状态。`finishRun()` 负责在数据库中执行最后的状态判断。[^storage]
 
-这也提示我们如何测试：让模型在“即将完成”处等待，先提交取消命令，再放行模型完成事件。断言应检查 Run、ModelStep 和终态事件，而不是只看请求是否返回成功。
-
-## Retry 和 Resume 都产生新的执行身份
-
-Retry（重试）从同一用户回合的输入重新开始；Resume（恢复）从一个已经验证的 Checkpoint（检查点）继续。它们都生成新的 Run，并保留与旧尝试的关联。[^recovery]
-
-```text
-Turn U1
-├── Run R1：interrupted
-└── Run R2：新的尝试
-    retryOfRunId = R1
-    或 resumesRunId = R1，checkpointId = CP1
+```mermaid
+sequenceDiagram
+  participant M as 模型响应
+  participant C as 取消请求
+  participant D as 数据库状态锁
+  M->>M: 响应准备完成，等待测试屏障
+  C->>D: 提交cancel_requested
+  D-->>C: 已受理取消
+  M->>D: 尝试提交completed
+  D-->>M: CANCEL_REQUESTED
+  M->>D: 取消收尾
 ```
 
-旧 Run 保持自己的状态、调用和用量。这样，系统可以准确回答“哪个尝试产生了最终答案”“恢复时复用了什么”“总共调用了几次模型”。
+测试用屏障固定这个顺序，才能稳定重现竞争。将取消和响应同时启动后观察偶然结果，不能准确证明裁决规则。
 
-这套实现将重试和恢复限制在当前最后一个失败、取消或中断回合。完成历史上的 Fork（建立独立对话分支）是另一项操作。任意位置编辑、运行中追加输入等能力，需要各自定义历史可见性和调度规则，不能从已有恢复接口直接推导。
+已提交的工具结果仍然保留。取消改变运行终态，不会让此前实际发生的调用从审计历史中消失。
 
-## 检查点保存的是可证明的继续位置
+## 09｜Failed、Interrupted、Cancelled 与 Outcome Unknown 分别表示什么？
 
-一个数字“已经执行到第三步”不足以恢复模型循环。程序还需要知道第三步使用的消息历史、成功工具结果、工具版本和当前权限。
+状态名称需要结合所属对象理解。Run 的 failed 表示执行失败，interrupted 表示进程、租约或预算等边界造成中断，cancelled 表示取消完成。
 
-当前工程提供三类检查点：
+ToolInvocation 的 outcome_unknown（结果状态不确定）表示外部动作与本地结果提交无法完整确认。它不意味着业务必然失败，也不是成功别名。
 
-**回合起点 `turn_boundary`。** 保存已经完成的历史和当前正式受理的输入。恢复后从当前回合的起点继续，它对应的是清晰的输入边界。
+| 事实 | 可用记录 | 后续判断 |
+| --- | --- | --- |
+| 模型返回合法答案并成功提交 | 助手条目、最终引用、终态 | completed |
+| 用户取消已收尾 | 取消意图和终态 | cancelled |
+| 预算耗尽 | 已提交部分结果、预算原因 | interrupted |
+| 工具结果结构非法 | Invocation 错误及原边界 | failed 或对应拒绝 |
+| 工具已返回但提交未确认 | 调用记录与不确定状态 | 需要重新核对 |
 
-**工具结果边界 `tool_result_boundary`。** 保存已经成功提交、调用与结果关联完整的工具条目。恢复使用原结果引用，并标记对应调用已经完成，避免无意重复同一已完成动作。
+预算用完时，不保证仍有剩余模型调用来生成一段完整的“阶段总结”。系统可以保留部分内容和结构化结束原因。若产品要求始终生成总结，应预留独立预算并定义它的状态含义。
 
-**SDK 状态边界 `sdk_state`。** 使用 SDK 的公开序列化和解析接口，再检查状态格式、上下文、历史和未完成的会话写入等条件。通过检查的状态才标为 recoverable（可恢复）。[^checkpoint]
+公开结果应说明已获得证据的范围。部分原文可用与整个问题已回答，是两个判断。
 
-```text
-检查点
-  → 已提交条目的有序引用
-  → SDK 与状态格式版本
-  → 模型配置和工具集合身份
-  → 恢复模式及可恢复原因
-  → 当前授权和资源条件
+## 10｜Retry 和 Resume 分别创建什么？
+
+Retry（重试）从同一 Turn 的输入重新开始。Resume（恢复）从一个可验证检查点继续。二者都创建新的 Run，并保留原尝试身份。
+
+```json
+{
+  "turnId": "SYN-U-01",
+  "attempts": [
+    {"runId": "SYN-R-01", "status": "interrupted"},
+    {
+      "runId": "SYN-R-02",
+      "status": "queued",
+      "resumesRunId": "SYN-R-01",
+      "checkpointId": "SYN-CP-01"
+    }
+  ]
+}
 ```
 
-版本检查服务于语义一致性。一个工具现在返回另一种字段结构，或者模型历史解释方式已经改变，旧检查点就可能不适合直接继续。保存一个可解析的 JSON，只说明数据能够读入；恢复要求它仍能表达同一条执行链。
+这是一份合成聚合视图。实际 API 分别返回 Run 和检查点对象。
 
-## 结果尚未保存时，系统需要保留不确定性
+该版本限制在最后一个未完成回合进行相应重试或恢复，并检查当前 Run 身份、Thread revision 和授权。已完成历史的 Fork（建立新线程分支）是独立能力。
 
-考虑如下顺序：外部工具成功返回，本地得到对象，数据库提交失败。结果还没有成为持久事实，后续模型就不应把它当成已经保存的证据继续使用。
+新 Run 有新的调用计数和执行资格。跨尝试统计应汇总旧 Run 的实际消耗，不能只保留成功尝试的费用。
 
-工具包装器会尝试将状态记为 `outcome_unknown`（结果不确定）并向上报告失败。数据库整体不可用时，这次状态更新也可能失败，随后需要运行监督在存储恢复后收敛未完成记录。[^tools]
+## 11｜Checkpoint 到底保存哪些数据？
 
-这种状态表达的是证据边界：外部动作可能发生过，但产品无法完整确认结果提交。当前业务工具是只读查询，在新尝试中通过当前授权和策略检查后，可以重新读取。涉及真实业务写入的工具则需要上游幂等、效果查询或补偿协议，不能直接沿用只读重查方法。
+Checkpoint（检查点）描述一个经过确认的继续位置。公开接口提供模式、版本、是否可恢复及原因；私有存储保存有序条目引用和可选 SDK 状态。
 
-对于已经持久化的成功结果，恢复沿用原条目及来源信息。它不会把旧数据重新标成新取得的数据，也不会把恢复变成一份没有历史的全新回答。
+```json
+{
+  "checkpointId": "SYN-CP-01",
+  "runId": "SYN-R-01",
+  "mode": "tool_result_boundary",
+  "recoverable": true,
+  "sdkVersion": "0.18.0",
+  "toolsetSnapshotId": "SYN-TOOLSET",
+  "modelProfileId": "SYN-MODEL-PROFILE",
+  "schemaVersion": "insurance-recovery/1"
+}
+```
 
-## 状态大小决定哪些恢复方式仍然可用
+上面是公开检查点的字段摘录。内部状态包含 `inputItemRefs`，以及适用时的 `sdkState`。受限消息不应自动出现在公共摘要中。
 
-两个工具结果可以各自满足单次结果预算，但合并后的 SDK 状态超过产品恢复信封上限。工程专门测试了这种情况。[^checkpoint]
+三个条件需要分别检查：能够序列化、能够解析、可以在当前权限和版本下安全继续。一个 JSON 能读入，不等于它仍然表达正确的运行历史。
 
-保存前的恢复校验与读取时使用同一套状态解析规则。超限的 SDK 状态被标为不可按该模式恢复，同时保留已提交事实引用；工具结果边界仍可能可用。
+源码还固定状态格式与版本：引用格式、SDK 包版本、SDK 序列化版本各自保存。它们不是可以随意互换的一串版本号。[^recovery]
 
-这意味着恢复能力应按模式报告，而不是给整个 Run 一个笼统的“能恢复”标记。调用方需要知道当前可选边界，以及限制来自状态体积、格式、版本还是权限。
+## 12｜三种恢复边界分别恢复什么？
 
-## 一组好的测试会安排明确的时间交错
+### turn_boundary：当前回合起点
 
-可靠性测试的重点是控制执行停在哪里。例如模型流已输出一段内容、工具已开始但未返回、工具结果刚刚保存、租约已经过期、取消命令已提交。每个位置的后续行为都不同。
+这一边界保留已完成历史和当前正式受理的用户输入。恢复从当前回合的清晰起点开始，适合尚无可复用工具结果的情况。
 
-使用受控模型、合成工具和真实测试数据库，可以重复安排这些时序。随后检查旧租约写入被拒绝，成功结果继续存在，终态只按规则成立，恢复产生新 Run，事件序列和实体状态保持一致。
+它不表示从任意 token 中途恢复，也不是重新创建一个不相关的用户问题。
 
-项目恢复记录覆盖了 Session 引用变化、取消后的租约过期、大 SDK 状态，以及已提交工具结果的复用。分析这些案例时，应把测试中的受控故障与真实业务效果分开：前者验证机制，后者验证模型是否有效完成咨询。[^tests]
+### tool_result_boundary：已提交工具结果
 
-## 控制能力让自主运行具有清晰边界
+这一边界使用已经成功保存、调用和结果关联完整的条目。恢复继续引用原 ToolResult，并标记对应调用已完成。
 
-预算限制资源范围，取消提供有效控制入口，检查点给中断后的继续提供依据。三者共同回答一个问题：当前系统可以证明什么已经发生，允许下一步做什么。
+如果 SDK 再次尝试同一个已完成调用 ID，执行包装器会识别它，防止无意重复执行。后续新查询仍需使用自己的调用身份。
 
-完整 Agent 任务由许多小动作组成。让每个动作都具有明确身份、提交顺序和结束条件，自主执行就能进入可管理的产品生命周期。下一篇继续分析其中最重要的小动作：[ToolInvocation 的完整生命周期](07-tool-invocation-lifecycle.md)。
+### sdk_state：已验证的 SDK 状态
+
+这一边界尝试保存 SDK RunState（运行状态对象），并通过公开解析方法恢复。只有满足状态格式、上下文和历史一致性，才标记为可恢复。
+
+```mermaid
+flowchart TD
+  R["中断 Run"] --> C["检查持久事实"]
+  C --> T["turn_boundary：回合输入"]
+  C --> E["tool_result_boundary：已提交工具结果"]
+  C --> S["sdk_state：可解析且历史一致的SDK状态"]
+  T --> N["创建新 Run"]
+  E --> N
+  S --> N
+  N --> A["当前授权与版本复核"]
+```
+
+不同模式保留不同继续信息。服务应按模式报告支持情况，而不是给整个运行一个模糊的“支持恢复”标签。
+
+## 13｜SDK 状态怎样通过恢复准入？
+
+`inspectSdkCheckpoint()` 先调用 `state.toString()`，检查序列化版本，再确认没有不支持的状态所有权。随后使用 SDK 的公开 parser（解析器）尝试恢复，并比较历史内容摘要。[^recovery]
+
+检查项包括：
+
+| 条件 | 原因 |
+| --- | --- |
+| SDK 序列化版本匹配 | 保证按正确格式解释状态 |
+| 没有未支持的服务端会话所有权 | 避免混用本地历史与远端会话 |
+| 没有未完成 Session 写入 | 避免跳过尚未成立的事实 |
+| 本地 context 与当前 Run 一致 | 防止恢复到错误运行环境 |
+| 已提交历史与 SDK history 一致 | 确认模型状态依据真实持久输入 |
+| 中断类型受支持 | 仅恢复实现能够继续的路径 |
+
+核心比较如下：
+
+```ts
+// runner/recovery.ts：校验历史的局部摘编。
+const restored = await RunState.fromStringWithContext(
+  agent,
+  serialized,
+  new RunContext({ runId }),
+  { contextStrategy: "replace" },
+);
+const facts = entries.map(entry =>
+  contentDigest(protocol.ModelItem.parse(entry.canonical))
+);
+const history = restored.history.map(item =>
+  contentDigest(protocol.ModelItem.parse(item))
+);
+if (contentDigest(facts) !== contentDigest(history)) {
+  return rejected("SDK_HISTORY_NOT_COMMITTED");
+}
+```
+
+受限状态应保留原始原因。删除一个不理解的字段，再把剩余 JSON 解释为“恢复成功”，会改变 SDK 状态的真实含义。
+
+当前恢复代码使用 `contextStrategy: replace` 将本地 context 关联到新 Run，同时验证其他已保存历史。它不是直接恢复旧进程的内存、网络连接或计时器。
+
+## 14｜工具成功返回，但结果没有提交怎么办？
+
+最危险的窗口位于外部效果与内部记录之间：
+
+```text
+外部工具请求已执行
+  → 本地获得返回值
+  → 数据库提交失败或进程退出
+```
+
+重启后，系统可能看见工具调用开始，却找不到可靠结果。此时不能把进程内曾经出现的对象当成已提交证据。
+
+工具包装器尝试写入 `outcome_unknown` 并停止模型继续。如果连这次状态更新也失败，监督逻辑还要在数据库恢复后收敛未结束记录。
+
+当前业务能力是只读查询。新尝试在当前授权下可以重新读取。但“只读”也可能产生费用、审计日志或新的数据版本，重查应记录新的观察时间。
+
+未来接入业务写操作时，还需要上游幂等键、效果查询或补偿协议。例如支付或保单变更不能仅因本地没收到结果就盲目重发。本文的运行恢复机制不自动提供外部业务写入的恰好一次保证。
+
+对于已经成功提交的 ToolResult，恢复沿用原条目和来源身份。旧结果的观察时间也保留，避免被重新标成最新读取。
+
+## 15｜Worker 退出和 SDK 状态超限怎样处理？
+
+Lease（租约）过期后，监督程序读取持久状态并结束失去执行者的 Run。旧执行器即使稍后恢复，也会因为 Fence 或有效期不符而失去写入权。
+
+程序正常停机时，会先通知本地运行停止，再等待执行和监督收尾，最后关闭存储。异常退出则依赖已提交事实和租约监督恢复一致性。
+
+状态大小同样影响恢复。当前私有恢复协议限制 SDK 状态字符串最多4000000个字符、引用最多10000项。字符限制与工具 UTF-8 字节限制使用不同单位。[^recovery]
+
+两个合法工具结果合并后，仍可能使 SDK 状态超限。此时 SDK 状态模式可以不可恢复，但已经提交的工具结果边界仍可能可用。
+
+<details>
+<summary><strong>展开：恢复失败原因应怎样解释？</strong></summary>
+
+`SDK_SCHEMA_VERSION_UNSUPPORTED` 表示格式不匹配。`SESSION_AUTHORITY_PENDING` 表示会话写入或事务尚未收敛。`SDK_HISTORY_NOT_COMMITTED` 表示 SDK 历史与持久事实不同。
+
+这些原因不是同一种网络错误。调用方应按具体模式和原因选择重试、回合起点或工具结果恢复，而不是无限重复同一恢复请求。
+
+</details>
+
+## 16｜怎样验证预算、取消与恢复？
+
+测试需要在明确边界暂停执行，再触发控制命令或故障。推荐使用同步屏障固定时序，而不是用短暂 sleep 猜测。
+
+| 测试窗口 | 操作 | 核心断言 |
+| --- | --- | --- |
+| 下一次模型调用前 | 用完模型预算 | 不再开始新 ModelStep |
+| 多工具调用入口 | 超过总量 | 超额工具不执行 |
+| 模型即将完成 | 先提交取消 | 成功提交被状态规则拒绝 |
+| 工具结果已保存 | 结束 Worker | 原结果仍可读取 |
+| 租约过期 | 旧 Worker 写入 | `LEASE_LOST` |
+| 恢复启动 | 改变工具版本 | 明确兼容性判断 |
+| SDK 状态过大 | 保存检查点 | 模式和原因如实报告 |
+
+只读查询可以检查运行与恢复对象：
+
+```sql
+SELECT id, status, termination_reason, model_calls, tool_calls
+FROM runtime.runs WHERE id = $1;
+
+SELECT id, mode, recoverable, reason, sdk_version,
+       toolset_snapshot_id, through_event_seq
+FROM runtime.checkpoints WHERE run_id = $1 ORDER BY created_at;
+
+SELECT id, status, provider_call_id, result_item_ref
+FROM runtime.tool_invocations WHERE run_id = $1;
+```
+
+参数 `$1` 是实际测试 Run ID。私有检查点状态可能含完整模型历史，应通过受控维护权限读取。
+
+现有测试入口包括 Runner 与恢复套件。使用前准备隔离数据库配置：
+
+```bash
+INSURANCE_STORAGE_TEST_CONFIG=/absolute/private/test-db.json \
+  corepack pnpm test:runner
+
+INSURANCE_STORAGE_TEST_CONFIG=/absolute/private/test-db.json \
+  corepack pnpm test:recovery
+```
+
+历史恢复记录覆盖 Session 引用、结果复用、取消与租约竞争以及状态大小边界。具体当前通过数量，以实际运行输出为准。[^tests]
+
+## 17｜有界执行让模型能力进入产品生命周期
+
+自主 Agent 需要行动空间，也需要资源与状态规则。预算约束调用，取消提供用户控制，检查点保存可继续的位置，租约确定谁可以提交。
+
+对于开头的复杂查询，系统最终应说清楚：哪些证据已经获得，哪些结果已经保存，当前为什么结束，以及后续可以复用什么。一次结束不一定是完整业务成功，但必须是可以解释的执行状态。
+
+这些规则会在每一次工具调用中落实。下一篇沿调用身份、权限和结果提交深入：[ToolInvocation 的完整生命周期](07-tool-invocation-lifecycle.md)。
 
 ## 实现依据
 
-[^budget]: Insurance Agent Runtime 源码快照 `c66112dfd8676b47b143dc2e26739278cf4b0dde`：`apps/runtime/src/runner/facade.ts` 的 `budgetFor`，以及 `runner/model.ts`、`runner/tools.ts`、`runner/context-budget.ts`。参数数值描述此快照，不作为通用默认建议。
-[^cancel]: 同一快照：`RunnerFacade.execute`、`RuntimeStorage.finishModelStep`、`finishRun` 和 `assertLease`，以及 `registry/registry.ts` 中的期限和信号检查。
-[^recovery]: 同一快照：`apps/runtime/src/storage/store.ts` 的 `retryTurn`、`resumeRun` 与完成边界 Fork 实现。
-[^checkpoint]: 同一快照：`apps/runtime/src/runner/recovery.ts`、存储中的 `saveRecoveryCheckpoint`，以及 `docs/implementation/recovery-boundaries-fix.md`。SDK 状态机制可参考 [OpenAI Agents SDK：Human in the loop](https://openai.github.io/openai-agents-js/guides/human-in-the-loop/)，产品恢复范围由上述代码限定。
-[^tools]: 同一快照：`apps/runtime/src/runner/tools.ts` 中工具结果提交与失败处理。文中区分一次状态写入尝试和已经读回确认的持久状态。
-[^tests]: `docs/implementation/recovery-boundaries-fix.md`、`tests/recovery/` 和 `docs/implementation/runner-preparation.md` 保存的既有验证设计与记录。
+[^budget]: Insurance Agent Runtime `c66112dfd8676b47b143dc2e26739278cf4b0dde`：`apps/runtime/src/runner/facade.ts` 的预算解析，以及 `model.ts`、`tools.ts`、`context-budget.ts` 的执行边界。
+[^tools]: 同一快照：`apps/runtime/src/runner/tools.ts`、`registry/registry.ts`。信号合并与期限检查属于该实现的本地控制机制。
+[^storage]: 同一快照：`apps/runtime/src/storage/store.ts` 的取消、模型完成、运行完成、重试、恢复和租约检查。
+[^recovery]: 同一快照：`apps/runtime/src/runner/recovery.ts` 与 `storage/recovery.ts`。SDK 包版本0.18.0、序列化版本1.20和恢复信封版本分别校验。
+[^tests]: `docs/implementation/recovery-boundaries-fix.md`、`tests/recovery/`、`tests/runner/`。独立示例只验证局部信号行为，真实恢复仍需对应集成测试。
+[^public]: [Node.js Globals：AbortController](https://nodejs.org/api/globals.html#class-abortcontroller)；[OpenAI Agents SDK](https://openai.github.io/openai-agents-js/)。产品恢复能力以锁定源码和测试为准。
