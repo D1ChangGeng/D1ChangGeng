@@ -2,14 +2,14 @@
 
 ## Harness 工程实践
 
-从一次条款查询出发，沿真实 TypeScript 工程理解请求受理、任务调度、模型循环、工具系统、持久状态、恢复、事件协议与工程验证。14 篇文章按阅读顺序编号，包含源码分析、合成案例和代码示例。第 03—14 篇另附可独立审阅的内容大纲。
+从一次条款查询出发，沿真实 TypeScript 工程理解请求受理、任务调度、模型循环、工具系统、持久状态、恢复、事件协议与工程验证。14 篇文章按阅读顺序编号，包含源码分析、合成案例和代码示例。14 篇文章均配有对应内容大纲，可按顺序对照阅读。
 
 **[从第一篇开始阅读](insurance-agent-weekly/01-from-rag-to-harness.md)** · [浏览全部文章](insurance-agent-weekly/) · [查看内容大纲](insurance-agent-weekly/outlines/)
 
 | 序号 | 正文 | 大纲 |
 | --- | --- | --- |
-| 01 | [从一次知识查询认识 Agent Harness：它是什么、长什么样、怎样运行？](insurance-agent-weekly/01-from-rag-to-harness.md) | — |
-| 02 | [一次 Agent 回答怎样才能被核验：数据契约、运行事实与证据评测](insurance-agent-weekly/02-contracts-and-runtime-facts.md) | — |
+| 01 | [从一次知识查询认识 Agent Harness：它是什么、长什么样、怎样运行？](insurance-agent-weekly/01-from-rag-to-harness.md) | [大纲](insurance-agent-weekly/outlines/01-from-rag-to-harness.md) |
+| 02 | [一次 Agent 回答怎样才能被核验：数据契约、运行事实与证据评测](insurance-agent-weekly/02-contracts-and-runtime-facts.md) | [大纲](insurance-agent-weekly/outlines/02-contracts-and-runtime-facts.md) |
 | 03 | [用户点击发送之后：请求受理、幂等与执行事务](insurance-agent-weekly/03-request-admission-and-transactions.md) | [大纲](insurance-agent-weekly/outlines/03-request-admission-and-transactions.md) |
 | 04 | [从排队任务到模型循环：Worker、执行租约与 RunnerFacade](insurance-agent-weekly/04-worker-and-model-loop.md) | [大纲](insurance-agent-weekly/outlines/04-worker-and-model-loop.md) |
 | 05 | [为什么 Agent 能够继续查：会话历史、工具结果与上下文投影](insurance-agent-weekly/05-session-and-context.md) | [大纲](insurance-agent-weekly/outlines/05-session-and-context.md) |
