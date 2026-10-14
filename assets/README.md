@@ -9,7 +9,7 @@
 | 序号 | 文章 |
 | --- | --- |
 | 01 | [从一次知识查询认识 Agent Harness：它是什么、长什么样、怎样运行？](insurance-agent-weekly/01-from-rag-to-harness.md) |
-| 02 | [让 Agent 的行为可以被验证：契约、运行实体与证据标尺](insurance-agent-weekly/02-contracts-and-runtime-facts.md) |
+| 02 | [一次 Agent 回答怎样才能被核验：数据契约、运行事实与证据评测](insurance-agent-weekly/02-contracts-and-runtime-facts.md) |
 | 03 | [用户点击发送之后：请求受理、幂等与执行事务](insurance-agent-weekly/03-request-admission-and-transactions.md) |
 | 04 | [从排队任务到模型循环：Worker、执行租约与 RunnerFacade](insurance-agent-weekly/04-worker-and-model-loop.md) |
 | 05 | [为什么 Agent 能够继续查：会话历史、工具结果与上下文投影](insurance-agent-weekly/05-session-and-context.md) |
