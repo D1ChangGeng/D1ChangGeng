@@ -1,70 +1,179 @@
 # 一次工具调用如何成为可靠执行：ToolInvocation 的完整生命周期
 
-用户要求比较两款产品的保障责任与缴费条件。模型在一次响应中提出两个查询：一个检索条款，一个读取结构化产品字段。两个外部接口返回速度不同，其中一个结果还包含缺失字段。
+## 01｜模型同时查询两个产品，程序需要记录什么？
 
-从模型视角看，这是两个工具调用。从工程视角看，它们是两个需要独立管理身份、权限、状态和结果的执行实例。Harness（智能体执行控制系统）要明确：哪个模型响应提出了调用，哪个后端处理了参数，哪份结果已经保存，以及下一次模型调用何时可以使用结果。
+> 比较示例保障甲和示例保障乙的等待期，并列出对应条款出处。
 
-Insurance Agent Runtime 使用 ToolInvocation（工具执行实例）承载这些事实。本篇沿 `createRunTools()` 展开，从模型调用意图一直走到结果持久化与模型继续执行。
+模型可能在一次响应中提出两条检索调用。第一个接口很快返回，第二个还在等待。一个结果包含完整来源，另一个只找到部分正文。
 
-## ToolCall 表示意图，ToolInvocation 表示执行
+用户看见的是一项比较任务。运行系统需要分别记录两个动作的身份、状态、参数和结果。否则，结果完成顺序改变时，很容易把产品甲的条款关联到产品乙。
 
-ToolCall（工具调用意图）是模型输出中的结构化条目，包含工具名称、参数和调用标识。ToolInvocation 则是运行系统创建的执行记录。两者通过 `providerCallId`、`callItemRef` 和 `modelStepId` 关联。[^tools]
+ToolInvocation（工具执行实例）就是这项记录。它连接模型提出的动作与服务端实际取得的结果。一个用户任务可以包含多个实例，每个实例都有独立状态。
 
 ```text
-ModelStep S1
-├── ToolCall C1：查询产品甲条款
-└── ToolCall C2：读取产品乙字段
-
-ToolInvocation V1
-  modelStepId = S1
-  providerCallId = C1 的 callId
-  callItemRef = C1 的条目 ID
-
-ToolInvocation V2
-  modelStepId = S1
-  providerCallId = C2 的 callId
-  callItemRef = C2 的条目 ID
+一次模型响应
+  ├── C1：查询产品甲
+  │    └── V1：先完成，结果 E1
+  └── C2：查询产品乙
+       └── V2：后完成，结果 E2
 ```
 
-一个 ModelStep（模型调用步骤）可以提出多个意图，执行实例分别记录成功、失败和取消。模型响应完成时，ModelStep 就可以结束；后端工具仍然继续自己的生命周期。
+C1、C2 是调用意图的 ID。V1、V2 是产品执行 ID。完成顺序由网络和后端决定，关联关系由稳定身份决定。
 
-在模型输出被保存时，`RecordedModel.complete()` 会建立 `callId → ModelStep 与调用条目` 的映射。后续工具包装器据此检查 SDK 要执行的调用是否确实来自当前运行已记录的模型输出。工具名和调用身份都匹配，才能继续。[^model]
+## 02｜Tool、ToolCall、ToolInvocation 和 ToolResult 分别是什么？
 
-## 工具定义如何变成 SDK 可执行函数
+Tool（工具）是一项可调用能力，例如搜索文档。ToolCall（调用意图）是模型选择这项能力并生成参数的结构化输出。ToolInvocation 记录实际执行，ToolResult（工具结果）保存返回数据。
 
-ToolRegistry（工具注册系统）根据运行快照生成一组 `ToolBinding`（工具执行绑定）。绑定包含能力标识、模型工具名、版本、参数 Schema（结构约束）、权限要求、数据模式和实际执行函数。
+| 对象 | 主要字段 | 回答的问题 |
+| --- | --- | --- |
+| Tool | 名称、说明、Schema、执行函数 | 系统提供什么能力？ |
+| ToolCall | callId、工具名、参数 | 模型要执行什么？ |
+| ToolInvocation | invocationId、状态、引用 | 系统实际如何执行？ |
+| ToolResult | 数据、来源、覆盖和缺口 | 工具取得了什么？ |
 
-`createRunTools()` 再把这些绑定转换成 SDK 的函数工具。除了使用 SDK 完成参数解析，包装器还接入产品的执行治理。
+下面是模型可见的搜索参数，内容为合成示例：
+
+```json
+{
+  "content": "分别核对示例产品的等待期",
+  "query": "示例保障甲 等待期 正式条款",
+  "companyIds": null,
+  "productIds": null,
+  "topK": 5
+}
+```
+
+同一参数对象进入模型输出时，通常被放在 `function_call.arguments` 的 JSON 字符串里。具体原始字段由 SDK 模型适配器转换。
+
+```json
+{
+  "type": "function_call",
+  "callId": "call-syn-1",
+  "name": "search_documents",
+  "arguments": "{\"content\":\"查询等待期\",\"query\":\"示例保障甲 等待期\",\"companyIds\":null,\"productIds\":null,\"topK\":5}"
+}
+```
+
+这条意图本身不证明工具已经执行。权限、版本、输入 Schema（结构约束）和预算都要在实际入口检查。
+
+## 03｜ToolBinding 怎样变成 SDK FunctionTool？
+
+ToolBinding（工具执行绑定）把稳定能力连接到具体本地执行函数。它包含产品能力 ID、模型可见名称、版本、输入 Schema、输出 Schema、权限范围和数据模式。
+
+`createRunTools()` 遍历绑定，创建 SDK 的 FunctionTool（函数工具）。[^tools]
 
 ```ts
-// 源码摘编：完整工具定义还包括结果提取与错误处理。
-const boundTool = tool({
-  name: binding.modelName,
-  description: binding.description,
-  parameters: binding.parameters,
-  outputSchema: z.object({}).catchall(z.unknown()),
-  errorFunction: null,
-  execute: async (input, context, details) => {
-    // 校验当前 Run、工具调用身份、权限和预算。
-    // 保存执行实例，调用 binding.execute，再返回验证后的结果。
-  },
+// runner/tools.ts，装配入口摘编。
+return bindings.map(binding => {
+  if (names.has(binding.modelName)) {
+    throw new RunBoundaryError("DUPLICATE_TOOL_NAME");
+  }
+  names.add(binding.modelName);
+  if (binding.effect !== "read") {
+    throw new RunBoundaryError("TOOL_EFFECT_UNSUPPORTED");
+  }
+  if (!("content" in binding.parameters.shape)) {
+    throw new RunBoundaryError("TOOL_CONTENT_SCHEMA_REQUIRED");
+  }
+  return tool({
+    name: binding.modelName,
+    description: binding.description,
+    parameters: binding.parameters,
+    outputSchema: z.object({}).catchall(z.unknown()),
+    errorFunction: null,
+    execute: /* 当前 Run 的执行包装器 */ execute,
+    customDataExtractor: /* 结果提交回调 */ extract,
+  });
 });
 ```
 
-这里 SDK 外层的宽对象 Schema 并不代表业务结果任意放行。执行函数内部仍调用 `binding.outputSchema.parse(result)`，Registry 也会验证具体能力的输出结构。SDK 包装层负责接入执行协议，严格业务契约在产品边界继续成立。[^tools][^registry]
+`execute` 和 `extract` 在实际源码里直接作为闭包定义。片段使用名称突出两个阶段，不是可以独立运行的完整注册程序。
 
-这是一种适配取舍：框架的错误转译和结果提取行为，需要通过锁定版本的实际测试确认。把输入错误自动转换成一段没有产品执行身份的结果，可能破坏后续追踪；因此实现显式处理这类行为。
+当前包装器支持 `effect=read` 的业务工具。工具规格可以描述更多效果，但注册成运行工具仍需通过当前实现的效果检查。
 
-## 执行前先固定调用身份和业务参数
+唯一工具名保证 SDK 能找到确定的函数。版本检查保证这次运行使用的工具与快照一致。`content` 是动作说明，后续会与业务参数分开保存。
 
-工具开始执行时，包装器先检查 SDK 上下文中的 Run ID，再从 `details.toolCall` 读取调用标识，并与模型边界保存的事实匹配。恢复时已经完成的调用，也通过已保存集合进行检查。
+## 04｜调用 ID 怎样关联到 ModelStep？
 
-接着处理权限和参数。工具输入中的 `content` 是模型生成的公开动作说明，例如“分别查询两款产品的缴费条件”。业务后端只接收剩余业务参数：
+ModelStep（模型调用步骤）记录一次模型边界调用。模型响应可能包含多个 `function_call`。`RecordedModel.complete()` 保存输出条目后，建立 `callSteps` 映射：
+
+```ts
+// model.ts 中响应完成后的事实索引。
+if (raw.type === "function_call" && typeof raw.callId === "string") {
+  this.facts.callSteps.set(raw.callId, {
+    stepId,
+    itemId: item.itemId,
+    canonical: raw,
+  });
+}
+```
+
+工具入口从 SDK 的 `details.toolCall` 取得 callId，再查找该映射。它还核对工具名称和当前 Run。
+
+```ts
+const callId = details?.toolCall?.callId;
+const call = callId ? facts.callSteps.get(callId) : undefined;
+if (!callId || !call || details?.toolCall?.name !== binding.modelName) {
+  throw new RunBoundaryError("TOOL_CALL_IDENTITY_MISMATCH");
+}
+```
+
+这个检查保护的是调用来源。一个函数即使可以被本地代码调用，也不能随意伪装成当前模型已经提出的动作。
+
+数据库还对同一 Run 的 `provider_call_id` 设置唯一约束。内存索引用于执行连接，持久约束保护最终事实，两层不能互相替代。
+
+## 05｜工具开始前怎样检查授权和预算？
+
+RunEnvironment（本地运行环境）包含当前主体、运行快照、存储、租约、预算和取消信号。工具执行使用这些可信条件，而不是从模型参数里读取身份。
+
+包装器检查 `requiredScopes`（所需权限范围）是否被运行主体允许。后续 Registry（工具注册执行层）还会读取当前授权与资源状态。快照允许的能力和当前仍有效的权限共同限定执行。
+
+恢复时，`completedCallIds` 保存已经成功执行的调用身份。如果 SDK 试图再次执行同一已完成 callId，包装器会报告 `RECOVERED_TOOL_CALL_ALREADY_COMPLETED`。
+
+预算在动作入口预留：
+
+```ts
+if (++reserved > environment.budget.maxToolCalls) {
+  throw new RunBoundaryError("TOOL_BUDGET_EXHAUSTED");
+}
+```
+
+并发上限控制同时执行数量，调用预算控制总动作数。合法权限也不代表无限次数。
+
+权限拒绝可能发生在创建 ToolInvocation 之前。此时存在模型调用意图，但没有对应的已开始执行实例。测试应观察拒绝发生的位置，不能要求所有模型意图都已有 running 记录。
+
+## 06｜content 为什么与业务参数分开？
+
+`content` 是模型生成的公开动作说明，例如“核对两款产品的等待期”。它帮助外部理解模型准备做什么，但不是隐藏推理全文，也不证明动作已完成。
+
+业务服务真正需要的是 `query`、产品筛选和 TopK。因此执行器先拆分：
 
 ```ts
 const { content, ...businessArguments } = parameters;
+```
 
-await storage.startInvocation(lease, {
+随后将动作说明和参数分别写入 Invocation。业务绑定只接收 `businessArguments`，当前主体和客户端依赖从本地环境传入。
+
+```text
+模型生成
+  content：为什么调用这个公开工具
+  query / filters：查什么
+
+服务端提供
+  principal：以谁的身份
+  backend：调用哪个已配置服务
+  signal：何时停止
+  lease：谁有权写入结果
+```
+
+这种分工避免模型通过参数替换当前机构、服务地址或凭证。返回结果也应把文档正文当作业务数据，不将其内容自动提升为运行控制指令。
+
+## 07｜startInvocation 怎样建立执行事实？
+
+通过入口检查后，包装器生成新的 invocationId，调用存储：
+
+```ts
+await environment.storage.startInvocation(environment.lease, {
   invocationId,
   modelStepId: call.stepId,
   providerCallId: callId,
@@ -77,102 +186,307 @@ await storage.startInvocation(lease, {
 });
 ```
 
-这段动作说明可以帮助外部读者理解“模型声明自己要做什么”，但它不是对模型内部推理的完整记录，也不是执行已经成功的证明。真正结果由调用状态、后端返回和持久事实确认。
+存储在租约保护下检查当前 Run 和取消状态。它确认 ModelStep 属于该 Run，保存调用条目，插入 running Invocation，更新 Run 的工具调用计数，再写 `tool_invocation.started` 事件。[^store]
 
-机构、主体、上游地址和客户端凭证由本地环境提供。模型负责语义查询与业务筛选，服务端负责把筛选解释为当前授权范围内的实际请求。
+这些写入共同提交。外部读到 started 事件时，就有对应的产品执行记录可以查询。
 
-## 结果返回后，还有两次重要检查
+```json
+{
+  "invocationId": "SYN-V-01",
+  "runId": "SYN-R-01",
+  "modelStepId": "SYN-MS-01",
+  "providerCallId": "call-syn-1",
+  "capabilityId": "knowledge.search_documents",
+  "version": "1.0.0",
+  "status": "running",
+  "resultItemRef": null,
+  "dataMode": "synthetic"
+}
+```
 
-第一类检查针对结果结构。返回内容必须通过对应能力的输出 Schema，且序列化后的大小符合结果预算。`sourceRefs`（来源引用集合）也要能够从结果中提取并与具体数据关联。
+这是执行记录的合成摘录。`resultItemRef=null` 表示当前尚未提交结果，而不是工具已经返回空业务数据。
 
-第二类检查针对结果来源。Registry 比较输出的 `provenance`（数据来源声明）与当前 Backend Descriptor（后端描述）是否一致，包括数据模式、后端身份和数据集版本。结果里出现的来源引用还必须被总引用集合覆盖。[^registry]
+## 08｜业务函数执行时还有哪些边界？
 
-例如，录制后端不能把返回值标为实时数据，某个字段条目也不能悄悄携带外层未声明的来源引用。类型正确只能证明结构可解析；来源一致性检查进一步确定“这份数据是谁提供的”。
-
-对于过大的结果，Registry 的结果收敛函数按能力规则限制内容并保存对应缺口信息。执行包装器随后再检查最终字节大小。系统既需要保护资源，也需要让模型知道返回结果的覆盖范围。
-
-## 最关键的顺序：提交结果，再继续模型
-
-业务后端返回一个对象时，它还只是进程内的值。SDK 需要把它转换为自己的工具结果条目，而产品需要保存这个确切条目，才能在恢复和下一次模型请求中引用它。
-
-工程先把验证后的结果放入本次调用的暂存映射，随后在 `customDataExtractor`（SDK 结果条目提取回调）取得 `rawItem`，为它分配产品条目 ID，并等待持久化完成。[^tools]
+工具执行器组合 Run 级信号和 SDK 提供的工具信号。调用前检查取消，再把参数和本地环境交给后端绑定。
 
 ```ts
-// 摘编自 customDataExtractor；省略失败分支。
+const signal = details.signal
+  ? AbortSignal.any([environment.signal, details.signal])
+  : environment.signal;
+signal.throwIfAborted();
+const result = await binding.execute(
+  Object.freeze(businessArguments),
+  { ...environment, signal },
+);
+```
+
+AbortSignal（取消信号）负责协作式停止。后端 Adapter（业务适配实现）应把它继续传到网络或 SDK 请求，并在必要位置复核。
+
+`Object.freeze()` 冻结这一层参数对象。它不是递归深冻结，也不是权限机制。嵌套对象仍需由 Schema 和业务边界处理。
+
+只读效果也有实际影响。查询可能消耗配额、产生审计日志，或者读到不同版本数据。只读表示不修改目标业务状态，不代表调用完全没有成本。
+
+当前错误分类依赖包装器能识别的错误类型和取消信号。未知异常会归一为通用工具执行失败。某个底层服务返回“超时”文字，不一定自动进入 `timed_out`，应检查适配层是否保留了规范错误代码。
+
+## 09｜结果怎样通过结构、大小和来源校验？
+
+业务返回值先经过 `binding.outputSchema.parse(result)`。Schema 确认字段和类型，例如页码是整数或 null，证据行包含约定的来源信息。
+
+包装器随后将结果序列化为 JSON，检查 UTF-8 字节数，再提取 `sourceRefs`（来源引用集合）。
+
+```ts
+const validated = binding.outputSchema
+  ? binding.outputSchema.parse(result)
+  : result;
+const serialized = JSON.stringify(validated);
+if (typeof serialized !== "string"
+    || Buffer.byteLength(serialized) > environment.budget.maxToolResultBytes) {
+  throw new RunBoundaryError("TOOL_RESULT_BUDGET_EXHAUSTED");
+}
+const refs = [...(binding.sourceRefs?.(validated) ?? [])];
+```
+
+Registry 还验证 provenance（数据来源声明）与后端描述是否一致。数据模式、后端 ID 和数据集版本都应匹配。证据行中的来源引用也必须被结果外层引用集合覆盖。[^registry]
+
+```json
+{
+  "status": "empty",
+  "data": [],
+  "sourceRefs": [],
+  "coverage": "unknown",
+  "missing": [],
+  "warnings": [],
+  "provenance": {
+    "mode": "synthetic",
+    "backendId": "example-retrieval",
+    "datasetVersion": "fixture-v1",
+    "observedAt": "2026-10-01T00:00:00Z"
+  }
+}
+```
+
+这是一份合法形状的合成空结果。它可以作为成功执行返回。最终是否足够回答用户问题，需要模型和业务评测另行判断。
+
+SDK 外层使用宽对象 `outputSchema`，并不代表这里省略了业务校验。当前实现为了处理锁定 SDK 版本的工具错误转译，在内部保留了严格的业务 Schema。应沿完整执行链阅读，而不是只看 SDK 配置中的一行。
+
+## 10｜为什么还需要 customDataExtractor？
+
+后端返回的是业务对象。SDK 会把它转换成模型历史使用的工具结果条目。为了让存储与模型实际消费的结构一致，Harness 需要保存这个确切条目。
+
+`pending` 映射暂存已经验证、尚待条目提交的结果，按 callId 关联。SDK 调用 `customDataExtractor`（结果条目提取回调）时提供 `rawItem`。
+
+```text
+Backend JSON
+  → 业务校验
+  → pending[callId]
+  → SDK 形成 function_call_result
+  → customDataExtractor 取得 rawItem
+  → 规范化产品 Runtime Item
+```
+
+`rawItem` 在这里是 SDK 层的条目，不是上游 HTTP 的原始响应。`runtimeItem()` 将它包装为产品运行内容，并保存 itemId、模型步骤和来源引用。
+
+这种位置选择解决一个实际问题：如果存储保存业务对象 A，而模型最终收到由 SDK 转换过的对象 B，恢复时必须知道真正的模型输入是哪一份。记录确切规范化结果，可以减少这层歧义。
+
+## 11｜“先保存结果，再继续模型”怎样由代码保证？
+
+关键不是发出一条异步日志，而是让 SDK 等待持久化回调完成。
+
+```ts
+// customDataExtractor 的核心提交顺序。
 const call = pending.get(toolCall.callId);
+if (!call) throw new RunBoundaryError("TOOL_RESULT_IDENTITY_MISMATCH");
 const id = randomUUID();
 const item = {
   ...runtimeItem(rawItem, id, call.stepId),
   sourceRefs: [...call.sourceRefs],
 };
-
-await storage.finishInvocation(lease, call.invocationId, {
-  status: 'succeeded',
-  resultItem: item,
-  sourceRefs: call.sourceRefs,
-  checkpoint: true,
-});
-
+await environment.storage.finishInvocation(
+  environment.lease,
+  call.invocationId,
+  {
+    status: "succeeded",
+    resultItem: item,
+    sourceRefs: call.sourceRefs,
+    checkpoint: true,
+  },
+);
 recordFact(facts, rawItem, id);
 pending.delete(toolCall.callId);
 ```
 
-`finishInvocation()` 在数据库事务中保存结果条目、执行实例终态和 `tool_invocation.completed` 事件；指定检查点时，还保存工具结果恢复边界。只有这些写入完成，回调才返回，SDK 才能继续使用该结果。
+`finishInvocation()` 在一个事务里保存结果条目、执行实例终态、完成事件，以及适用的工具结果检查点。只有提交成功，SDK 才能结束该回调并推进后续调用。
 
-这建立了一条 Happens-before（先后依赖）关系：
-
-```text
-工具结果持久提交
-  happens-before
-下一次模型请求消费该结果
+```mermaid
+sequenceDiagram
+  participant T as 工具执行
+  participant S as SDK
+  participant DB as Storage
+  T-->>S: 已验证业务结果
+  S->>DB: 结果条目与Invocation提交
+  DB-->>S: COMMIT
+  S->>S: 更新模型历史
+  S->>S: 下一次模型调用
 ```
 
-如果改成后台异步写日志再立即返回，模型可能已经依据某份证据给出结论，数据库却永远没有保存这份证据。进程一旦中断，系统就无法重建那次回答的真实输入。
+### 一个可运行的先后关系测试
 
-## 工具状态与业务结果状态要分别阅读
+下面的 Python 示例只模拟因果顺序。它不代替数据库事务，却可以直观看见提交失败如何阻断模型继续。
 
-执行实例的 `succeeded` 表示执行边界成功得到并提交了合法结果。业务结果中的 `status` 则可能是 `ok`、`partial`、`empty` 或某种结构化错误状态。
+```python
+import asyncio
 
-例如查询优惠得到空集合，外部请求和结果提交都可能成功，但业务含义是本次范围没有命中。读取结构化字段得到 `null` 和缺失说明，也可以是一次成功完成的工具动作。
 
-反过来，参数非法、权限在执行期间撤回、调用超时或结果结构无法解析，会触发相应执行失败路径。有些拒绝发生在创建 ToolInvocation 之前，因此不能假定每一个模型意图都已经成为执行实例。[^tools][^registry]
+async def run_case(commit_fails):
+    trace = []
 
-| 层次 | 示例判断 | 回答的问题 |
+    async def tool():
+        trace.append("tool_returned")
+        return {"evidence": "synthetic"}
+
+    async def commit(result):
+        trace.append("commit_started")
+        if commit_fails:
+            raise RuntimeError("COMMIT_FAILED")
+        trace.append("commit_succeeded")
+
+    result = await tool()
+    await commit(result)
+    trace.append("next_model_request")
+    return trace
+
+
+async def main():
+    success = await run_case(False)
+    assert success == ["tool_returned", "commit_started", "commit_succeeded", "next_model_request"]
+    try:
+        await run_case(True)
+        raise AssertionError("需要提交失败")
+    except RuntimeError as error:
+        assert str(error) == "COMMIT_FAILED"
+    print("提交成功后继续；提交失败时不进入后续模型调用")
+
+asyncio.run(main())
+```
+
+实际产品测试应在真实 `finishInvocation()` 处注入失败，并检查模型调用计数及数据库事实。仅测试一个独立 Promise 链，不能证明 SDK 包装器已经使用了同样的等待关系。
+
+## 12｜执行 succeeded 与业务 partial 为什么可以同时出现？
+
+执行状态描述动作是否按协议完成。业务状态描述获得的数据是什么。来源状态描述这些数据能否进一步核对。
+
+| 层次 | 典型字段 | 示例 |
 | --- | --- | --- |
-| 模型意图 | 工具名、参数和 callId | 模型提出了什么动作 |
-| 执行实例 | running、succeeded、failed、cancelled | 系统如何执行并提交动作 |
-| 业务结果 | empty、partial、missing | 这次查询获得了什么业务信息 |
-| 来源状态 | 版本、授权、页码映射 | 信息能否按声明被核对 |
+| 模型意图 | callId、name、arguments | 想查询产品甲 |
+| 执行实例 | running、succeeded、failed | 查询及结果提交完成 |
+| 业务结果 | ok、partial、empty | 只取得部分条款 |
+| 证据来源 | metadataStatus、sourceRef | 原文定位尚待确认 |
 
-把四层合并为一个布尔 `success`，会丢失排障所需的大部分信息。
+一次查询返回空数组可以是合法业务结果。金额字段未知也可以用 null 和缺失说明表达。Harness 应保存这种信息，而不是为让调用“看起来成功”而填入猜测值。
 
-## 多工具并发改变时序，不改变身份
+同样，HTTP 200 只说明远端请求按其协议返回。结果结构错误、来源声明不符或输出过大，仍可能导致产品工具执行失败。
 
-模型在同一响应中返回两个调用，SDK 可以根据 `maxFunctionToolConcurrency` 控制并发数量。工具总次数预算则由当前 Run 的共享计数限制。
+<details>
+<summary><strong>展开：三种看似相似的“没有结果”</strong></summary>
 
-假设调用 C1 花两秒，C2 花半秒。数据库事件可能先出现 V2 完成，再出现 V1 完成。这完全合理。调用发起顺序、完成顺序和后续模型输入的排列需要分别理解，通过稳定 ID 关联，而不是依据“列表第二项应该对应第二个返回”来猜测。
+`resultItemRef=null` 且 Invocation running：工具还未提交结果。
 
-还要区分模型步骤与工具步骤。两个并发工具可以来自同一 ModelStep；真正的新模型请求开始时才产生下一个 ModelStep。工具数量增加不应该自动变成模型调用次数增加。
+Invocation succeeded 且 ToolResult empty：合法查询没有命中。
 
-对于存在数据依赖的多跳任务，模型往往需要先得到前一个工具结果，再生成后一个调用参数。这类依赖通过后续模型步骤表达。调度器可以并发独立调用，但不能凭借并发设置消除业务数据依赖。
+Invocation failed：执行边界发生错误，需要读取对应错误代码。
 
-## 结果写入失败是最有价值的测试之一
+它们应有不同的日志、事件和后续模型行为。
 
-一个可重复的测试剧本可以这样安排：模型第一次返回调用，合成工具成功返回，存储在提交工具结果时抛错。预期是下一次模型调用没有发生，执行实例进入相应失败收尾，原工具结果不会被伪装成已持久事实。
+</details>
 
-实际包装器在提交失败时尝试将 Invocation 标为 `outcome_unknown`（结果不确定），并向上抛错。如果数据库连这次收尾都无法完成，运行监督还需要在恢复后继续收敛状态。因此，“尝试标记未知”与“未知状态已经写入数据库”也要由读回证据区分。[^tools]
+## 13｜多工具并发怎样保持结果关联？
 
-另一组测试应设置不同工具并发上限，观察实际峰值；再让输出超大、Schema 不匹配或来源集合缺项，检查失败落在哪个边界。工程的 Runner 和 Registry 测试说明记录了这些验证方向。[^tests]
+并发改变完成顺序，不改变 callId。两个独立工具可以来自同一个 ModelStep，并按各自延迟结束。
 
-## 复杂任务的可靠性建立在每个小动作上
+```mermaid
+sequenceDiagram
+  participant S as SDK
+  participant A as 工具A / C1
+  participant B as 工具B / C2
+  participant D as Storage
+  S->>A: 开始C1
+  S->>B: 开始C2
+  B->>D: 提交E2
+  D-->>B: C2完成
+  A->>D: 提交E1
+  D-->>A: C1完成
+  S->>S: 按调用身份构建后续输入
+```
 
-跨产品对比看起来是一个大任务，底层却是多个有身份的调用和结果。每个调用都经过授权、预算、输出校验和持久化，后续模型才能在确定的事实基础上继续。
+存储事件可以先记录 V2 完成，再记录 V1 完成。这是实际时间顺序。模型输入如何排列由 SDK 协议决定，程序应按 ID 配对，不凭返回数组第几个元素猜测来源。
 
-ToolInvocation 的意义就在这里：它把“模型说要查”与“系统已经完成并保存查询”连接起来。下一篇继续沿结果中的来源引用深入，看看这些数据怎样一直追溯到原始文档：[证据与授权来源](08-evidence-and-source-references.md)。
+依赖查询则不同。若第二个动作需要第一个工具返回的产品 ID，通常需要下一次模型请求再生成参数。调高并发无法消除这种业务依赖。
+
+共享预算也必须覆盖并发入口。一次模型响应返回十个调用，不代表十个都可以绕过总工具上限。超限动作被拒绝，已开始动作分别收尾。
+
+## 14｜超时、取消和提交失败怎样结束？
+
+执行函数内的异常会被归一为工具错误，并调用 `finishInvocation()` 保存 failed、cancelled、timed_out 或 denied 等状态。具体分类依赖可识别错误与信号。
+
+结果提交阶段还有一个特殊窗口：业务已返回，SDK 结果也已形成，但数据库没有确认成功。这时包装器尝试保存 `outcome_unknown` 和 `TOOL_RESULT_COMMIT_FAILED`。
+
+```text
+外部效果已发生
+  → 结果持久化失败
+  → 尝试记录 outcome_unknown
+  → SDK 后续模型调用被阻止
+```
+
+若数据库整体不可用，第二次收尾写入也可能失败。随后需要 Worker 监督、租约过期和维护流程收敛未完成状态。不能仅因代码调用了更新方法，就声称状态已经成功保存。
+
+当前只读工具可以在新尝试中重新查询，但必须保留新的执行身份、时间与费用。未来写操作需要上游幂等、效果读回或补偿，不能直接复制查询重试逻辑。
+
+取消同样无法撤销已经完成的远端动作。它控制后续准入与结果接受，并保留已提交的事实。
+
+## 15｜怎样用数据库和故障测试验证完整生命周期？
+
+对一条受控 Run，至少查询模型步骤、工具执行和结果条目：
+
+```sql
+SELECT id, ordinal, status, output_item_refs
+FROM runtime.model_steps WHERE run_id = $1 ORDER BY ordinal;
+
+SELECT id, model_step_id, provider_call_id, capability_id,
+       status, call_item_ref, result_item_ref, source_refs
+FROM runtime.tool_invocations WHERE run_id = $1;
+
+SELECT id, role, status, canonical, source_refs
+FROM runtime.runtime_items WHERE id = $2;
+```
+
+`$1` 绑定测试 Run ID，`$2` 绑定已核对的结果引用。查询需要授权的隔离数据库。
+
+确定性测试使用 ScriptedModel（按剧本返回响应的模型替身）。首个响应产生工具调用，第二次检查收到的结果。断言两个 ModelStep、一个成功 Invocation、一个合法最终引用，以及事件关联一致。
+
+故障用例应覆盖：重复工具名、错误 callId、缺少 scope、超预算、Schema 错误、来源不匹配、结果过大、提交失败、并发取消和恢复后重复调用。
+
+其中部分拒绝发生在实例创建前，部分发生在实例已经 running 后。测试应验证对应边界的真实记录，而不是为每一种错误强造一条成功启动事件。
+
+```bash
+INSURANCE_STORAGE_TEST_CONFIG=/absolute/private/test-db.json \
+  corepack pnpm test:runner
+```
+
+项目的 Runner 与 Registry 测试包含结果提交、工具并发和输出校验等断言。新故障剧本应执行后再报告结果，不能把设计表中的用例直接写为已通过。[^tests]
+
+## 16｜复杂任务的可靠性来自每一个小动作
+
+产品对比可能需要多次模型调用和多份证据。每项结论都依赖某个工具真正返回并保存的结果。
+
+ToolInvocation 把模型意图、执行授权、业务返回和持久事实连接起来。调用身份让并发可追踪，结果 Schema 保持数据合法，提交顺序保证后续模型使用已成立的事实。
+
+有了这些关系，复杂任务就能逐步核验：哪个动作提供了哪份证据，哪个失败需要重试，哪个结果可以用于恢复。下一篇继续追踪结果中的文档、页码与授权来源：[证据身份、来源引用与多跳查询](08-evidence-and-source-references.md)。
 
 ## 实现依据
 
-[^tools]: Insurance Agent Runtime 源码快照 `c66112dfd8676b47b143dc2e26739278cf4b0dde`：`apps/runtime/src/runner/tools.ts`，`createRunTools` 与 `customDataExtractor`；`storage/store.ts` 的 `startInvocation`、`finishInvocation`。
-[^model]: 同一快照：`apps/runtime/src/runner/model.ts`，`RecordedModel.complete` 保存调用条目并建立 `callSteps` 映射。
-[^registry]: 同一快照：`apps/runtime/src/registry/registry.ts` 的 `bindingsFor`、`execute`、`invoke`，以及 `registry/output.ts`；业务结果结构见 `packages/contracts/src/tools.ts`。
-[^tests]: `docs/implementation/runner-preparation.md` 与 `tests/registry/registry.test.ts` 的既有测试定位。SDK 工具接口另见 [OpenAI Agents SDK：Tools](https://openai.github.io/openai-agents-js/guides/tools/)，具体回调行为以项目锁定版本为准。
+[^tools]: Insurance Agent Runtime `c66112dfd8676b47b143dc2e26739278cf4b0dde`：`apps/runtime/src/runner/tools.ts`，`createRunTools` 与 `customDataExtractor`。SDK 相关行为绑定版本0.18.0。
+[^store]: 同一快照：`apps/runtime/src/storage/store.ts` 的 `startInvocation`、`finishInvocation`、`recoveryEntries` 与工具结果检查点。数据库约束见 `storage/schema.ts`。
+[^registry]: 同一快照：`apps/runtime/src/registry/registry.ts`、`output.ts` 与 `packages/contracts/src/tools.ts`。业务状态与来源校验由这些边界定义。
+[^tests]: `tests/runner/`、`tests/registry/registry.test.ts` 与 `docs/implementation/runner-preparation.md`。教学轨迹使用合成 ID；结果提交故障等结论以实际测试证据为准。
+[^sdk]: [OpenAI Agents SDK：Tools](https://openai.github.io/openai-agents-js/guides/tools/)。公开工具接口与本项目额外的执行治理分别说明。
