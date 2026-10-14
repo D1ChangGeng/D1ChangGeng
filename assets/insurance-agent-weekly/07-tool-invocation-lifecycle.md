@@ -89,7 +89,7 @@ return bindings.map(binding => {
 
 `execute` 和 `extract` 在实际源码里直接作为闭包定义。片段使用名称突出两个阶段，不是可以独立运行的完整注册程序。
 
-当前包装器支持 `effect=read` 的业务工具。工具规格可以描述更多效果，但注册成运行工具仍需通过当前实现的效果检查。
+当前 `ToolSpecSchema`（工具规格约束）和工具包装器都只接受 `effect=read`。接入写操作时，需要共同扩展规格、权限、执行与恢复规则。[^registry]
 
 唯一工具名保证 SDK 能找到确定的函数。版本检查保证这次运行使用的工具与快照一致。`content` 是动作说明，后续会与业务参数分开保存。
 
@@ -348,7 +348,7 @@ async def run_case(commit_fails):
     async def commit(result):
         trace.append("commit_started")
         if commit_fails:
-            raise RuntimeError("COMMIT_FAILED")
+            raise RuntimeError("COMMIT_FAILED");
         trace.append("commit_succeeded")
 
     result = await tool()
@@ -487,6 +487,6 @@ ToolInvocation 把模型意图、执行授权、业务返回和持久事实连�
 
 [^tools]: Insurance Agent Runtime `c66112dfd8676b47b143dc2e26739278cf4b0dde`：`apps/runtime/src/runner/tools.ts`，`createRunTools` 与 `customDataExtractor`。SDK 相关行为绑定版本0.18.0。
 [^store]: 同一快照：`apps/runtime/src/storage/store.ts` 的 `startInvocation`、`finishInvocation`、`recoveryEntries` 与工具结果检查点。数据库约束见 `storage/schema.ts`。
-[^registry]: 同一快照：`apps/runtime/src/registry/registry.ts`、`output.ts` 与 `packages/contracts/src/tools.ts`。业务状态与来源校验由这些边界定义。
+[^registry]: 同一快照：`apps/runtime/src/registry/contracts.ts`、`registry.ts`、`output.ts` 与 `packages/contracts/src/tools.ts`。工具规格、业务状态与来源校验由这些边界定义。
 [^tests]: `tests/runner/`、`tests/registry/registry.test.ts` 与 `docs/implementation/runner-preparation.md`。教学轨迹使用合成 ID；结果提交故障等结论以实际测试证据为准。
 [^sdk]: [OpenAI Agents SDK：Tools](https://openai.github.io/openai-agents-js/guides/tools/)。公开工具接口与本项目额外的执行治理分别说明。
