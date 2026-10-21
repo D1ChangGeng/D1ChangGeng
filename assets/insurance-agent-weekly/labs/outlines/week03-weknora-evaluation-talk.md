@@ -1,57 +1,121 @@
 # 从一份保险问答标注认识 RAG 评估：WeKnora、错误归因与 Agent Harness｜内容大纲
 
-以第二周已经完成的保险问答 XLSX 标注为起点，沿一条真实问题的「提问—检索—回答—人工评价」记录，学习 WeKnora 的知识问答与评估机制；再以真正执行的 API 结果理解指标，把逐题错误定位到资料、检索、生成或 Agent 决策，最后回到 D 方向已建立的 Harness 运行链和第四周最小检索循环。
+从 WeKnora 的实际 Evaluation（评估）能力进入第三周主题，再沿一条来自上周 XLSX 的真实保险问题，展示数据读取、五文件转换、评估任务、检索与模型输入、评分、原文核对和归因。随后将单题方法推广到全部42题，以确定性检查、盲评模型、人工证据对照和批量统计建立可复核的归因方法。最后从分析中识别的实际信息缺口出发，讨论 Context、Tool、Guardrail、Hook、Continuation 与 Harness 运行事实怎样影响 Agent 的真实使用行为。
 
-这是一份供审阅的**专项技术分享大纲**，承接 [第三周实验任务](../week03-weknora-evaluation-and-attribution.md)，使用 [外部研究与源码依据](../research/week03-weknora-evaluation-source-notes.md) 完善技术解释。现场分享约 10–12 分钟；Markdown 正文可保留较充分的技术示例、源码和折叠证据，供分享前后阅读。实际分数、案例和截图待 Codex 私有实验证据包到达后引用。
+本纲对应[本篇完整正文](../week03-from-insurance-annotation-to-rag-evaluation.md)和[第三周外部研究底稿](../research/week03-weknora-evaluation-source-notes.md)。正文使用 2026-10-21 两轮私有实验证据，原始保险资料仅在授权环境保留；公开正文展示去标识案例、真实聚合指标与对应源码快照。与已发布的 Harness 系列保持「一个具体问题 → 看见数据形状 → 理解实际执行 → 核对结果 → 判断设计取舍」的教学路径。
 
-## 01｜上周的标注记录是什么、长什么样？
+## 01｜WeKnora 的 Evaluation 是什么？一套评测系统实际怎样工作？
 
-从上周 HTML 导出的 Excel 工作簿中选择一条真实咨询问题。先展示用户原问、模型返回的答案、检索参考 Chunk 及人工标注各是什么，怎样通过题目 ID、原文文件与页码彼此关联。用一张真实字段示例图说明我们已经有了可供评测和诊断的历史记录，再指出本周需要增加的是自动化的运行与比较方式。
+### 1.1｜先看 WeKnora：知识库问答与评估分别在做什么？
+先认识系统界面和功能：文档解析、索引、检索、重排、RAG 问答和 Agent。展示一次问答的最小数据链，明确 Evaluation 是围绕被测问答链路执行的另一套流程。原生评估当前调用 RAG 管道；Agent 模式具有独立的工具循环。
 
-## 02｜WeKnora 是什么？一次 RAG 问答究竟怎样发生？
+### 1.2｜为什么要评估？检索到相关资料与回答正确是什么关系？
+从保险条款的具体错误说明不同测量对象：检索是否取得正确证据、候选排序是否合理、生成文本与参考答案的接近程度、关键业务条件是否正确。展示三个互相独立的评价问题，建立后文指标的直觉。
 
-先展示 WeKnora 作为知识问答系统的基本形状：PDF 或其他文档被解析、切块、建立向量与关键词索引，用户问题经过检索、重排、模型生成得到回答。给出典型问题、检索结果对象和回答示例。随后区分快速回答（固定 RAG 管道）与模型可反复选择工具的 Agent 模式，为后面理解评估对象和 D 方向改造建立基础。
+### 1.3｜输入到底是什么？五个 Parquet 怎样描述一道问答？
+用一条简单数据展示 `queries/corpus/answers/qrels/qas` 五表，解释 qid、pid、aid，说明评估器为什么需要相关段落与参考答案。区分原始语料、标注关系与新的模型输出，并引出弱参考答案与独立 Gold 的差别。
 
-## 03｜Evaluation 是什么？一次真实评估请求怎样执行？
+### 1.4｜用户怎样启动和查看一个 Evaluation 任务？
+展示 POST/GET 的真实 HTTP 形状、`dataset_id`、模型、参考知识库、task_id、`status`、`finished/total`。说明任务创建回执与后台评估完成的不同，当前接口和固定目录的数据读取条件。
 
-以一个实际请求为主线，展示 API 请求体、所需数据结构、返回的任务 ID 和任务状态，再追踪后端 Handler、Dataset Service、Evaluation Service 到 RAG 执行与 Metric Hook。解释五个 Parquet 文件分别表示问题、语料、参考答案与关联关系；明确这些文件是 WeKnora 的接口输入要求。结合真实日志描述评估知识库如何建立、题目如何执行、分数如何汇总。区分官方样例成功与自有保险样本运行的实际证据。
+### 1.5｜请求进入 WeKnora 后走过哪些模块？
+沿 `EvaluationHandler → EvaluationService → DatasetService → CreateKnowledgeFromPassageSync → KnowledgeQAByEvent(rag) → MetricHook → MetricList.Avg` 的真实源码解释数据与状态。介绍索引、检索、上下文、生成、评分、任务内存记录以及原生结果的可观察边界。
 
-## 04｜指标是什么、怎么算、真实结果意味着什么？
+### 1.6｜十二项指标分别测量什么？怎样简单手算？
+用同一条有相关/无关块的排序列表解释 Recall、Precision、MRR、NDCG、MAP；用两种文本说明 BLEU/ROUGE。指出指标的分母、排名单位与输入准备对结论的影响；简述 Ragas 与 DeepEval 适用于其他质量和工具行为对象。
 
-先让读者看到真实响应的检索与生成指标字段，再用简短的实际排序示例解释 Recall、Precision、MRR、NDCG 的含义，用两种等义不同写法说明 BLEU/ROUGE 反映文本重合的能力范围。通过源码核对原生评估的语料导入、段落 ID 映射和分数平均规则，说明分数的统计单位、样本分母与输入匹配方式。给出本轮真实指标表，并将需要额外核验的实现口径作为工程研究点。
+### 1.7｜本轮已有哪些真实运行结果？WeKnora 原生评分要留意什么？
+交代 v0.8.3 官方单题样例真实跑通，并指出评分器可能只保留可匹配的 pid、相关语料入库不含全部无关块、结果在内存中。源码与11项受控 Go 测试用于解释输入口径，不把系统对官方样例的分数当成保险系统准确率。
 
-## 05｜已有保险标注怎样接入评估，得到的又是哪一种分数？
+### 1.8｜现有人工 XLSX 怎样进入下一步？
+展示上周两张工作表、42题和317个参考块，说明 qid 与 rank 的身份、历史回答为何需要从归档 HTML 补齐。以真实 Q40 的去标识版本进入下一章。
 
-沿实际 XLSX 数据适配流程，展示如何读取已有问题、原系统回答、参考 Chunk 和人工判断，并选择这些字段能够支持的评分方法。将 WeKnora 自己重新运行的 RAG 结果，与对原保险系统**历史输出**的评测分别说明；在有相关性标签时计算检索覆盖和排名，在有实际回答与上下文时观察 Faithfulness、Answer Relevancy 等维度，在输入不足时保留明确状态。用一张单题表连接自动评分与原人工判断，形成下一章的诊断起点。
+## 02｜一条保险问题怎样从 XLSX 走到 WeKnora 的真实评分与归因？
 
-## 06｜一个问题为什么答错？怎样从分数追到具体责任？
+### 2.1｜拿到这条真实记录时，具体有什么？
+展示 Q40 的去标识化问题、人工正确性、真实8条候选排序；说明第1/5/8条已被核查为关键支持材料，其余包含同词异产品干扰。让读者从一张具体数据表开始。
 
-选择一条已有人工标注、Chunk 和原始 PDF 线索的代表性案例，按「源文档是否具备正确事实—解析与切块是否完整—检索/重排是否取得所需证据—是否还需要其他查询—生成回答是否正确使用证据」逐层追踪。用原始检索排序、具体来源和自动评价解释 A/B/C/D、生成各层的责任，并保留共同原因和可验证的推断。说明“相关”“忠实于检索内容”和“保险业务事实正确”分别需要什么证据。
+### 2.2｜为什么原 XLSX 仍需要与历史 HTML 关联？
+实际单元格 `标注结果!B2/E2/R2` 与 `当前参考块` 的 qid+rank 关系；恢复原历史回答和 CID、核对317条正文与来源。演示单题中间对象与来源身份，说明评分输入如何防止错题串行。
 
-## 07｜固定检索为什么有时不够？怎样验证 Agent 补充查询的价值？
+### 2.3｜怎样转换成五个真正可读取的 Parquet？
+逐表展示行数、int64/string 类型与 qid/pid/aid 关系：1/8/1/3/1。解释真实相关 pid 为1、5、8，历史人工正确回答仅作弱参考；显示转换的代码、验证和源ID映射。说明5份文件的读回检查及固定样本目录。
 
-基于第六章中证据确实存在但首次查询尚不完整的情况，展示固定 RAG 的「原问题检索一次→生成」与自主 Agent 的「检索→识别缺口→改写或拆解查询→补充检索→再判断」两条路径。解释模型负责选择下一次动作，而检索器和事实资料保持各自职责。设计一次受控对照：固定语料和检索配置，比较首次与累计证据覆盖、查询次数、重复率、时延和成本；结果只报告已实际执行和验证的部分。
+### 2.4｜启动实验时配置了什么？实际遇到了什么输入兼容问题？
+给出真实 v0.8.3、SQLite、Qdrant 1.16.2、BAAI/bge-m3、无 Rerank、实际模型返回身份。说明首次默认 Parquet metadata 造成后台 panic，如何通过兼容写入选项完成真实修复；分清失败回执与任务成功。
 
-## 08｜已开发的 Harness 怎样承接这条链路？第四周从哪里开始？
+### 2.5｜真正调用接口以后，发生了什么？
+展示脱敏 POST JSON、轮询时间线、成功 `status=2, finished=1/1`。说明2次成功 Q40 任务属于独立运行，不将输出文本差异当作改善。
 
-从一个包含补充检索的保险问题回到具体工程：用户请求通过控制面成为 Thread、Turn 和 Run；模型调用形成 ModelStep；模型选择 Tool Registry 中的检索能力，工具执行形成 ToolInvocation，证据和最终内容拥有可追踪引用。展示现有 D 工程 `tools/evaluation/` 对固定检索、导出、评分与版本记录的支持，以及自主 Agent 运行后可以增加的轨迹评估。将这段讲述与已发布 [第02篇·数据契约与证据评测](../../02-contracts-and-runtime-facts.md)、[第03篇·请求受理与事务](../../03-request-admission-and-transactions.md)、[第12篇·Harness 测试与评测](../../12-testing-and-evaluation.md)相连接。以本周最明确的案例、数字和第四周最小 Agent 检索循环的验证目标收束。
+### 2.6｜搜索实际返回了什么？模型到底读到了什么？
+从日志和 provider input 看向量3条、关键词0条、合并3→1、c1/c2/c3对应原 pid1/5/8；区分历史8条展示窗口与新建知识库实际导入的3条。比较历史回答与本轮新生成的要点，指出源文档身份来自 sidecar。
+
+### 2.7｜怎么对历史8条结果手工评分？
+在历史窗口计算支持集合[1,5,8]的保留 Recall@5=2/3、支持密度@5=2/5、RR@5=1、分级 NDCG@5≈0.6508。将这些数与真实候选表对应，说明这不是全库严格 Recall。
+
+### 2.8｜WeKnora 的12项原生结果如何解释？
+展示真实新任务结果：原生 Recall=2/3、Precision/MRR/NDCG/MAP=1，以及 BLEU/ROUGE。明确本题新回答与旧回答的参照关系，原生 Recall 的2/3与历史保留 Recall@5相等仅属不同计算下的巧合。
+
+### 2.9｜明明三段进入模型，为什么原生 Recall 仍是2/3？
+先展示已观察的矛盾，再沿 Dataset、trim、Chunk 合并、共享对象和 Metric Hook 的文本匹配解释身份怎样丢失。展示 C01、C10、C11 的 Go 受控复现，强调部署二进制 MetricInput 尚未直接导出。
+
+### 2.10｜这一题的正确归因是什么？需要怎样保存证据？
+原历史回答的关键条件人工判为正确；噪音属于检索候选质量，身份丢失属于 Evaluation 口径；更合适的 Agent 对照是证据已充分时及时停止。给出全链归档文件和可复现步骤，过渡到42题批量分析。
+
+## 03｜怎样对42道保险问答建立可复算的批量归因方法？
+
+### 3.1｜批量归因的对象到底是什么？
+先展示42题人工分布与317块来源角色，让读者理解单题的正确、部分正确、错误、无法判断不会自动指向根因。定义一条题目统一分析记录和观测、模型候选、因果确认三类事实。
+
+### 3.2｜如何从两张工作表和历史 HTML 形成42条统一 Case？
+沿 `qid+rank` join 恢复回答、CID、Chunk顺序和来源，合并旧证据角色、原PDF核对线索；说明主 XLSX 与旧解析核查表的统计对象不同。展示 JSON 结构与可定位证据路径。
+
+### 3.3｜哪些检查可以完全使用确定性代码？
+展示字段完整性、来源页码、窗口外引用、Chunk角色、原排名、CID冲突与保留集评分。介绍 `analyze_batch.py` 输出42题JSON/CSV和317块特征表；所有代码判断都注明可以证明的内容。
+
+### 3.4｜哪些问题需要模型语义判断？
+解释冻结的 atomic-critical-v2 评审提示词如何抽取任务要求、原子事实断言、关键断言、支持/反证/不足、切题程度和完成情况。说明盲评不输入原人工标签，原始请求、模型返回与 token 另存。
+
+### 3.5｜这轮真正跑出了什么语义结果？
+展示42题语义可用、486断言、332支持/5反证/149不足；解释 Micro≈68.3%、Macro≈69.5% 与引文逐字匹配代理≈60.8%的不同分母。说明29完整/13部分是分析证据状态而非业务正确率。
+
+### 3.6｜怎样利用已有人工评价发现评审模型的错误？
+使用 Q9 错误年龄术语、Q28 关键实体、Q19 多产品缺口和 Q37 保守停止的案例，比较人工与模型的不同判断口径。说明8个历史案例参与规则校准，V1 与 V2 不构成独立准确率改善实验。
+
+### 3.7｜归因怎样从观察走向责任假设？
+分开「确定性观察」「历史人工标注」「已保存材料交叉支持的局部机制」「模型待验证候选」「全执行链因果确认」。同一题允许多标签。定义 A/B/C/D、Generation、Evidence/Observability、Evaluation、Resource；解释哪些不能直接标成检索失败或幻觉。
+
+### 3.8｜图表怎样准确表达批量问题分布？
+展示人工分布、题型、Chunk角色/排名、人工与Judge差异、模型问题候选与已核实观察、题型×技术层矩阵、问题→Harness建议。明确每一图的分母、多标签交叠与因果推断边界。数据图提供绘图脚本和原CSV/JSON。
+
+### 3.9｜如何从42题归因得出实际优化策略？
+以已观察的缺页/引用窗口、错误术语或实体、目标产品干扰、多产品资料不足为例，建立「现象 → 证据 → 责任候选 → 可控制变量 → 复验指标」矩阵。将资料/检索/生成/Agent决策作为不同实验，避免一律用多次检索解释。
+
+### 3.10｜本周批量研究可以支持哪些结论？
+汇总缺页31题、窗口外引文20题、模型层候选与已核实观察等关键统计；保留根因主路径确证数为0、正式业务检索资源仍-2050、补查0次的状态。说明哪些结论已经可复核、哪些必须等待真实旧系统全链Trace与受控干预。
+
+## 04｜批量归因能给 Agent Harness 的设计带来什么启发？
+
+### 4.1｜先看 Agent 使用中真正遇到的困难
+从上下文不完整、目标产品混入、关键术语被错误扩写、查询可能需要继续、来源难回查五种实际信号切入。用问题而不是模块名开始设计讨论。
+
+### 4.2｜Context、Tool、Guardrail、Hook 和 Continuation 分别能帮什么忙？
+将当前看到的证据与待补信息、检索工具过滤参数、关键断言的语义检查、模型/工具生命周期的采集点、继续/停止预算与状态联系起来。区分已实现的 schema/scope/预算、Runner/Session/ToolResult 事实与尚待设计的语义守卫、context manifest。
+
+### 4.3｜下一轮怎样通过实际 Agent 对照验证设计价值？
+采用多产品补查、主体关系规则、术语误解和已足够证据的停止对照；冻结相同库、问题、首轮证据和模型，比较固定一次检索、固定证据重新生成、最多三次自主检索的新增证据、关键断言、任务完成、调用次数与延迟。本次 DashVector -2050 尚未允许业务补查，Agent 效果属下一轮验证。
 
 ## 实践与图示设计
 
-以**一条真实案例**贯穿正文：上周的提问/回答/检索/标注 → WeKnora 机制图 → 实际 API 请求、运行状态与评分 → 历史保险系统评分对照 → 逐题错误归因 → 固定 RAG 与 Agent 循环对比 → 现有 Harness 的运行数据链。另选一条具有不同责任归因的案例作为对照。
+正文采用一次保险问题在第二章全程贯穿、第三章批量验证的组织方式。第二章重点展示 Q40 去标识候选表、原单元格位置、五个Parquet字段与行数、POST/GET 请求、实际检索/模型输入、12项原生分数、受控评分代码及归因；第一章用较短教学示例建立 Evaluation 基础。第三章使用8张实际统计图及方法流程图，图区分人工事实、模型候选和已经交叉支持的观察，图片不含原始业务正文；第四章按发现的问题映射到真实 Harness 源码与测试。
 
-核心展示包括：脱敏 XLSX/HTML 单题截图、RAG 与 Evaluation 双链路 Mermaid、五文件数据结构与请求示例、真实指标表、API/终端实测截图、错误定位的证据路径、Agent Loop 时序和 Harness 的 Thread/Turn/Run—ModelStep—ToolInvocation 关联图。
-
-正文采用已有14篇系列的 GitHub Markdown 教学风格：首次术语中英双释，代码和 JSON 先展示具体数据形状，必要细节放进 HTML `<details>` 展开区。学术材料帮助解释评估方法和边界，实际实验结论始终由原始 API、XLSX、Chunk、源码和运行截图支撑。分享内容中的真实结果、教学示例与源码推断使用不同证据口径。
+沿用现有14篇的中文技术教学风格：英文术语首次出现附中文解释，先展示真实数据形状再讲技术名称，过程从基础概念延伸到真实源码和工程取舍。图表、指标及实验截图明确标注来源；完整业务数据和鉴权值保留在授权私有证据包，公开稿使用去标识案例和可追溯聚合数字。
 
 ## 源码与依据
 
-WeKnora 官方基准：`Tencent/WeKnora` 当前核查源码快照 `9224b1f40313eca00f6e5441b83174eda59a4f44`（最终正文需对照 Codex 实际运行版本）。重点读取：
-
-- `website-docs/03-features/15-evaluation.md`、`05-retrieval-engines.md`、`07-agent.md`、`16-observability.md`
-- `internal/application/service/evaluation.go`、`dataset.go`、`metric_hook.go`、`metric/precision.go`、`metric/mrr.go`
-- `internal/handler/evaluation.go`、`internal/agent/engine.go`
-
-Ragas、DeepEval 的具体指标和参数，以选定版本的官方文档与实际调用为准。理论依据重点参考 [RAGAS](https://arxiv.org/abs/2309.15217)、[ARES](https://aclanthology.org/2024.naacl-long.20/)、[SoK: Agentic RAG](https://arxiv.org/abs/2603.07379)、[RAGCap-Bench](https://arxiv.org/abs/2510.13910)、[InsQABench](https://arxiv.org/abs/2501.10943) 和 [INSEva](https://arxiv.org/abs/2509.04455)。
-
-Insurance Agent D 的实际代码与验证记录待随私有证据 ZIP 复核，初始读取 `tools/evaluation/`、`docs/implementation/evaluation-preparation.md`、运行时 Runner、Tool Registry、Evidence、Session/ModelStep/ToolInvocation 相关实现及测试。正文将真实运行、历史证明、合成测试和进一步推断分别说明。
+- [WeKnora v0.8.3 对应源码](https://github.com/Tencent/WeKnora/tree/3e22822c1d2397be730c458c7539d0eb8c113a24)：`internal/handler/evaluation.go`、`internal/application/service/evaluation.go`、`dataset.go`、`metric_hook.go`、`metric/*`、`session_knowledge_qa.go`、`searchutil/chunkmerge.go`。
+- [WeKnora 官方 Evaluation 文档](https://weknora.weixin.qq.com/docs/03-features/15-evaluation)及 [Agent 文档](https://github.com/Tencent/WeKnora/blob/main/website-docs/03-features/07-agent.md)。
+- [Ragas](https://docs.ragas.io/en/latest/)及 [DeepEval](https://deepeval.com/docs/metrics-introduction)：补充答案、证据与 Agent 工具行为的评估方法。
+- [第三周外部研究底稿](../research/week03-weknora-evaluation-source-notes.md)：评估源码机制、论文与方法论背景。
+- 两轮私有实验：`insurance-agent-week03-weknora-evidence-20261021.zip` 与 `insurance-agent-week03-attribution-supplement-20261021.zip`；新增证据 S01–S18、继承 E01–E19；批量实验权威逐题数据 `CASE-RESULTS-42.json` 和 `statistics/summary.json`。
+- Insurance Agent D Runtime 源码快照 `c66112dfd8676b47b143dc2e26739278cf4b0dde`；既有系列[第02篇](../../02-contracts-and-runtime-facts.md)、[第03篇](../../03-request-admission-and-transactions.md)、[第12篇](../../12-testing-and-evaluation.md)。
