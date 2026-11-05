@@ -250,21 +250,7 @@ Stripe 的 SetupIntent 以及 Apple/Google 的付款方式设置检查可以分�
 
 两类风险可能相互影响，但其证据来源与最终决策主体并不相同。
 
-## 十、结论：谁知道什么，谁能证明什么，谁有权决定什么
-
-从银行卡授权到 Claude 的实际使用，需要分别回答四个问题：付款是否合法获得授权；账单资料是否准确且具有税务依据；Claude 账户对应的主体是谁；服务使用是否符合真实地区和其他政策要求。
-
-Stripe 可以为交易提供风险评分和检查结果，却通常不能把银行的完整实名档案与账单地址交给商户。Persona 可以提高账户身份可信度，却通常无法通过一张身份证件单独证明实时物理位置。应用商店可以确认订阅交易与权益，却不需要向开发者披露全部底层银行卡资料。
-
-因此，系统的证据强度应与其实际证明能力保持一致：
-
-**授权成功证明交易被接受；AVS 证明特定地址字段的核验状态；3DS 证明适用的持卡人认证；Persona 核实账户主体；地区合规则必须依据适用政策与能够证明实际使用资格的证据。**
-
-这些证据可以协同，但不能互相替代。对 Anthropic 内部未公开的风险阈值、Radar—Persona 联动及跨渠道 KYC 差异，应将其保留为待验证假设，而不是把个人案例的时间顺序直接写成因果规律。
-
-从实际使用角度，正确路径是以合法持有、真实账单、正常认证与合规服务资格建立长期可持续的支付和账户关系；从技术分析角度，最值得追问的是每个检查结果的证据边界，以及不同支付渠道的风险责任如何被清晰分配。
-
-## 十一、X 长文与第三方指南的交叉核实
+## 十、X 长文与第三方指南的交叉核实
 
 [Logan Lu 的 X 长文（2026 年 11 月 4 日）](https://x.com/loganlu51268/article/2117994685482537006)已经取得全文。文章主要整理了 [LinXiaoTao 的指南库](https://fuck-claude.vercel.app/guides/)及相关动态，属于二次研究。它将资料分为官方政策、公开逆向、社区反馈、站点自制检测器四类；这是评估其支付和风控观点时最重要的前提。
 
@@ -289,13 +275,28 @@ Stripe 可以为交易提供风险评分和检查结果，却通常不能把银�
 
 该 X 长文与指南库的最大贡献，是把支付、账户、网络和行为风险放入统一的问题地图。经过官方来源校准后，能够保留的是跨系统的证据分析方法；具体支付合规条件仍应以真实付款授权、准确账单资料、当前服务资格，以及各平台已公开的验证机制为准。
 
+## 十一、结论：谁知道什么，谁能证明什么，谁有权决定什么
+
+从银行卡授权到 Claude 的实际使用，需要分别回答四个问题：付款是否合法获得授权；账单资料是否准确且具有税务依据；Claude 账户对应的主体是谁；服务使用是否符合真实地区和其他政策要求。
+
+Stripe 可以为交易提供风险评分和检查结果，却通常不能把银行的完整实名档案与账单地址交给商户。Persona 可以提高账户身份可信度，却通常无法通过一张身份证件单独证明实时物理位置。应用商店可以确认订阅交易与权益，却不需要向开发者披露全部底层银行卡资料。
+
+因此，系统的证据强度应与其实际证明能力保持一致：
+
+**授权成功证明交易被接受；AVS 证明特定地址字段的核验状态；3DS 证明适用的持卡人认证；Persona 核实账户主体；地区合规则必须依据适用政策与能够证明实际使用资格的证据。**
+
+这些证据可以协同，但不能互相替代。对 Anthropic 内部未公开的风险阈值、Radar—Persona 联动及跨渠道 KYC 差异，应将其保留为待验证假设，而不是把个人案例的时间顺序直接写成因果规律。
+
+从实际使用角度，正确路径是以合法持有、真实账单、正常认证与合规服务资格建立长期可持续的支付和账户关系；从技术分析角度，最值得追问的是每个检查结果的证据边界，以及不同支付渠道的风险责任如何被清晰分配。
+
 ## 主要参考资料
 
 - [Stripe：How Anthropic Built a Scalable Revenue Model](https://stripe.com/customers/anthropic)
 - [Stripe：PaymentMethod API](https://docs.stripe.com/api/payment_methods/object)、[Charge API](https://docs.stripe.com/api/charges/object)
 - [Stripe：Card verification checks（CVC / AVS）](https://docs.stripe.com/disputes/prevention/verification)
 - [Stripe：Radar fraud prevention rules](https://docs.stripe.com/radar/rules)
-- [Anthropic：Consumer Terms of Service](https://www.anthropic.com/legal/consumer-terms)
+- [Anthropic：Consumer Terms of Service](https://www.anthropic.com/legal/consumer-terms)（第 6 节明确支付方式可属于本人或经持有人授权）
+- [Anthropic：Team plan billing FAQs](https://support.claude.com/en/articles/12997503-team-plan-billing-faqs)（明确接受 credit、debit、prepaid）
 - [Anthropic：Why was my card declined?](https://support.claude.com/en/articles/9402418-why-was-my-card-declined)
 - [Anthropic：Understanding your billing address and tax calculation](https://support.claude.com/en/articles/12997130-understanding-your-billing-address-and-tax-calculation)
 - [Anthropic：Identity verification on Claude](https://support.claude.com/en/articles/14328960-identity-verification-on-claude)
@@ -303,5 +304,6 @@ Stripe 可以为交易提供风险评分和检查结果，却通常不能把银�
 - [Anthropic：Supported Regions Policy（页面标注 2026-11-12 生效）](https://www.anthropic.com/legal/supported-regions)
 - [Apple：App Store Server API transaction payload](https://developer.apple.com/documentation/appstoreserverapi/jwstransactiondecodedpayload)
 - [Google：SubscriptionPurchaseV2](https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptionsv2)
+- [Anthropic：Safeguards warnings and appeals](https://support.claude.com/en/articles/8241253-safeguards-warnings-and-appeals) 与 [Transparency Hub](https://www.anthropic.com/transparency/system-trust-reporting)
 
-延伸阅读：[X 上 @loganlu51268 于 2026 年 11 月 4 日发布的帖子](https://x.com/loganlu51268/status/2117994685482537006)。该链接在本次复核时未能取得可核实的原文全文，因而本文未将其具体观点或案例作为已确认事实引用。
+第三方研究：[Logan Lu 的 X 长文（2026-11-04，已读取全文）](https://x.com/loganlu51268/article/2117994685482537006)、[FuckClaude 指南总目录](https://fuck-claude.vercel.app/guides/)、[支付方式与拒卡排查](https://fuck-claude.vercel.app/guides/payment-methods-comparison/)、[账户与虚拟卡支付分析](https://fuck-claude.vercel.app/guides/account-registration-and-payment-antiban/)、[逆向与风控模型](https://fuck-claude.vercel.app/guides/claude-steganography-and-risk-model/)、[封禁案例](https://fuck-claude.vercel.app/guides/ban-case-studies/)。上述材料已按官方、技术、逆向、社区经验分级；未经独立验证的机制及风险权重不作确定性结论。
